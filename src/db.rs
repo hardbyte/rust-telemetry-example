@@ -36,10 +36,9 @@ pub async fn init_db() -> Result<SqlitePool> {
     Ok(con_pool)
 }
 
-#[tracing::instrument]
+#[tracing::instrument( name = "get_all_books_from_db", level = tracing::Level::DEBUG )]
 pub async fn get_all_books(connection_pool: &SqlitePool) -> Result<Vec<Book>> {
-
-    debug!("Getting all books at debug inside a custom span");
+    debug!("Getting all books at debug inside db module");
 
     Ok(
         sqlx::query_as::<_, Book>("select * from books order by title, author")

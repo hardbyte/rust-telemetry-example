@@ -8,23 +8,40 @@ use tracing::{debug, info};
 use crate::db;
 use crate::db::{Book, BookCreateIn};
 
-#[tracing::instrument()]
+
+
+
+//#[tracing::instrument(skip(con), fields(num_books))]
 async fn get_all_books(
     Extension(con): Extension<SqlitePool>,
 ) -> Result<Json<Vec<Book>>, StatusCode> {
-    debug!("Getting all books at debug");
+
     info!("Getting all books info level");
+
     if let Ok(books) = db::get_all_books(&con).await {
+
+        // Now let's add an attribute to the tracing span with the number of books
+        tracing::Span::current()
+            .record("num_books", &books.len());
+
+        // Fetch the book details from the backend service
+        let book_details = crate::client::fetch_bulk_book_details(&books).await;
+
         Ok(Json(books))
     } else {
         Err(StatusCode::SERVICE_UNAVAILABLE)
     }
 }
 
+#[tracing::instrument(skip(con))]
 async fn get_book(
     Extension(con): Extension<SqlitePool>,
     Path(id): Path<i32>
 ) -> Result<Json<Book>, StatusCode> {
+
+    let trace_id = tracing_opentelemetry_instrumentation_sdk::find_current_trace_id();
+    debug!("trace id: {}", trace_id.unwrap());
+
     if let Ok(book) = db::get_book(&con, id).await {
         Ok(Json(book))
     } else {
@@ -32,6 +49,7 @@ async fn get_book(
     }
 }
 
+#[tracing::instrument(skip(con))]
 async fn delete_book(
     Extension(con): Extension<SqlitePool>,
     Path(id): Path<i32>
@@ -43,6 +61,7 @@ async fn delete_book(
     }
 }
 
+#[tracing::instrument(skip(con))]
 async fn update_book(
     Extension(con): Extension<SqlitePool>,
     Path(id): Path<i32>,
@@ -56,6 +75,7 @@ async fn update_book(
     }
 }
 
+#[tracing::instrument(skip(con))]
 async fn create_book(
     Extension(con): Extension<SqlitePool>,
     extract::Json(book): extract::Json<BookCreateIn>,

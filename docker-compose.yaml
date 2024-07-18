@@ -3,13 +3,23 @@ services:
   app:
     build: .
     environment:
-      RUST_LOG: debug
       OTEL_SERVICE_NAME: "bookapp"
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_EXPORTER_OTLP_ENDPOINT: http://telemetry:4317
       TRACE_SAMPLE_PROBABILITY: 1.0
     ports:
       - 8000:8000
+
+
+  backend:
+    build: .
+    environment:
+      OTEL_SERVICE_NAME: "backend"
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://telemetry:4317
+      TRACE_SAMPLE_PROBABILITY: 1.0
+    ports:
+      - 8001:8000
 
   telemetry:
     image: grafana/otel-lgtm:0.6.0

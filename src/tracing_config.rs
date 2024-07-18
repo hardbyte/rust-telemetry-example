@@ -1,23 +1,17 @@
-use opentelemetry::global;
-use opentelemetry_sdk::{
-    trace::TracerProvider
-};
-
-use tracing::Subscriber;
+use opentelemetry_sdk::propagation::TraceContextPropagator;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{
-    Layer,
-    filter::{LevelFilter},
-    util::SubscriberInitExt,
+    Layer
 };
-use tracing_subscriber::filter::FilterExt;
 
 pub fn init_tracing() {
-    // TODO propagator
 
-    // Note this automatically uses OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
-    // But assumes a GRPC endpoint (e.g port 4317 rather than 4318)
-    let exporter = opentelemetry_otlp::new_exporter().tonic();
+    opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
+
+    // Uses OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+    // Assumes a GRPC endpoint (e.g port 4317)
+    let exporter = opentelemetry_otlp::new_exporter()
+        .tonic();
 
     let tracer_provider = opentelemetry_otlp::new_pipeline()
         .tracing()
@@ -29,25 +23,24 @@ pub fn init_tracing() {
         .install_batch(opentelemetry_sdk::runtime::Tokio)
         .expect("Failed to create tracer provider");
 
-    // Set the global tracer provider
-    //global::set_tracer_provider(tracer_provider.clone());
-
-    // Get a global tracer from the global provider:
-    //let tracer = global::tracer("bookapp");
-
     // Filter the tracing layer - we can add custom filters that only impact the tracing layer
     let tracing_level_filter = tracing_subscriber::filter::Targets::new()
-        .with_target("bookapp", tracing::Level::DEBUG)
+        .with_target("bookapp", tracing::Level::TRACE)
+        .with_target("backend", tracing::Level::TRACE)
         .with_target("sqlx", tracing::Level::DEBUG)
         .with_target("tower_http", tracing::Level::INFO)
-        .with_default(tracing::Level::INFO);
-
+        .with_target("hyper_util", tracing::Level::INFO)
+        .with_target("h2", tracing::Level::WARN)
+        // Didn't work
+        //.with_target("[{otel.kind=server}]", tracing::Level::DEBUG)
+        // Note you can also use a crate feature flag crate to set the defaut tracing level
+        .with_target("otel::tracing", tracing::Level::TRACE)
+        .with_default(tracing::Level::DEBUG);
 
     // turn our OTLP pipeline into a tracing layer
     let tracing_opentelemetry_layer = tracing_opentelemetry::layer()
         .with_tracer(tracer_provider)
         .with_filter(tracing_level_filter);
-
 
     // Configure the stdout fmt layer
     let fmt_layer = tracing_subscriber::fmt::layer();

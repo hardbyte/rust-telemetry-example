@@ -1,6 +1,7 @@
 mod db;
 mod rest;
 mod tracing_config;
+mod client;
 
 use opentelemetry::global;
 
@@ -8,6 +9,7 @@ use tracing_subscriber;
 
 use anyhow::{Ok, Result};
 use axum::{Extension, Router};
+use axum_tracing_opentelemetry::middleware::{OtelAxumLayer, OtelInResponseLayer};
 use tower::{Layer, ServiceBuilder};
 use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 
@@ -20,12 +22,24 @@ fn router(connection_pool: SqlitePool) -> Router {
     Router::new()
         .nest_service("/books", rest::book_service())
         .layer(Extension(connection_pool))
-        .layer(ServiceBuilder::new().layer(
-            TraceLayer::new_for_http()
-                .make_span_with(DefaultMakeSpan::new()
-                    .include_headers(true)
-                    .level(tracing::Level::INFO))
-        ))
+        // include trace context as header into the response
+        .layer(OtelInResponseLayer::default())
+        // start OpenTelemetry trace on incoming request
+        // as long as not filtered out!
+        .layer(OtelAxumLayer::default())
+
+        // This creates a new Tracing span called "request" for each request,
+        // it logs headers etc but on its own doesn't do the OTEL trace context propagation.
+
+        // .layer(ServiceBuilder::new().layer(
+        //     TraceLayer::new_for_http()
+        //         .make_span_with(DefaultMakeSpan::new()
+        //             .include_headers(true)
+        //             .level(tracing::Level::INFO))
+        //
+        // ))
+        // Other non-traced routes can go after this:
+        //.route("/health", get(health)) // request processed without span / trace
 }
 
 
