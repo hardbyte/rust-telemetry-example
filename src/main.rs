@@ -1,33 +1,46 @@
 mod db;
 mod rest;
+mod tracing_config;
 
-use tracing::info;
+use opentelemetry::global;
+
 use tracing_subscriber;
-use anyhow::{Result, Ok};
+
+use anyhow::{Ok, Result};
 use axum::{Extension, Router};
+use tower::{Layer, ServiceBuilder};
+use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 
 use sqlx::SqlitePool;
-use crate::db::{init_db};
+use tracing::info;
+use crate::db::init_db;
+
 
 fn router(connection_pool: SqlitePool) -> Router {
     Router::new()
         .nest_service("/books", rest::book_service())
         .layer(Extension(connection_pool))
+        .layer(ServiceBuilder::new().layer(
+            TraceLayer::new_for_http()
+                .make_span_with(DefaultMakeSpan::new()
+                    .include_headers(true)
+                    .level(tracing::Level::INFO))
+        ))
 }
+
 
 #[tokio::main]
 async fn main() -> Result<()>{
     // Load env vars
     dotenv::dotenv().ok();
 
-    // install global collector configured based on RUST_LOG env var.
-    tracing_subscriber::fmt::init();
+    tracing_config::init_tracing();
 
     // Init db
     info!("Setting up Database");
     let connection_pool = init_db().await?;
     let app = router(connection_pool);
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:8000").await.unwrap();
     info!("Let's rock and roll");
     axum::serve(listener, app).await.unwrap();
 
@@ -36,6 +49,7 @@ async fn main() -> Result<()>{
     // let a_book = get_book(&connection_pool, 1).await;
     // println!("Got a book {:?}", a_book);
 
+    global::shutdown_tracer_provider();
 
     Ok(())
 }

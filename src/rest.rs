@@ -4,13 +4,16 @@ use axum::{Extension, extract, Json, Router};
 use axum::extract::{Path, Query};
 use axum::routing::{delete, get, patch, post};
 use sqlx::SqlitePool;
+use tracing::{debug, info};
 use crate::db;
 use crate::db::{Book, BookCreateIn};
 
-#[tracing::instrument]
+#[tracing::instrument()]
 async fn get_all_books(
     Extension(con): Extension<SqlitePool>,
 ) -> Result<Json<Vec<Book>>, StatusCode> {
+    debug!("Getting all books at debug");
+    info!("Getting all books info level");
     if let Ok(books) = db::get_all_books(&con).await {
         Ok(Json(books))
     } else {

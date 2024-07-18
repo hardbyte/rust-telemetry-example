@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Row, SqlitePool};
 use anyhow::{Result, Ok};
-
-
+use tracing::{debug, info, info_span, span};
 // #[derive(serde::Deserialize)]
 // struct WithID<T> {
 //     pub(crate) id: i32,
@@ -30,7 +29,8 @@ pub struct Book {
 }
 
 pub async fn init_db() -> Result<SqlitePool> {
-    let db_url = std::env::var("DATABASE_URL")?;
+    let db_url = std::env::var("DATABASE_URL").unwrap_or("sqlite::memory:".to_string());
+    info!("Connecting to database at {}", db_url);
     let con_pool = SqlitePool::connect(&db_url).await?;
     sqlx::migrate!().run(&con_pool).await?;
     Ok(con_pool)
@@ -38,11 +38,17 @@ pub async fn init_db() -> Result<SqlitePool> {
 
 #[tracing::instrument]
 pub async fn get_all_books(connection_pool: &SqlitePool) -> Result<Vec<Book>> {
+
+    debug!("Getting all books at debug inside a custom span");
+
     Ok(
         sqlx::query_as::<_, Book>("select * from books order by title, author")
             .fetch_all(connection_pool)
             .await?,
     )
+
+
+
 }
 pub async fn get_book(connection_pool: &SqlitePool, id: i32) -> Result<Book> {
     Ok(
