@@ -31,9 +31,7 @@ pub fn init_tracing() {
         .with_target("tower_http", tracing::Level::INFO)
         .with_target("hyper_util", tracing::Level::INFO)
         .with_target("h2", tracing::Level::WARN)
-        // Didn't work
-        //.with_target("[{otel.kind=server}]", tracing::Level::DEBUG)
-        // Note you can also use a crate feature flag crate to set the defaut tracing level
+        // Note an optional feature flag crate sets this most important trace from tracing to info level
         .with_target("otel::tracing", tracing::Level::TRACE)
         .with_default(tracing::Level::DEBUG);
 
