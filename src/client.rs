@@ -12,7 +12,7 @@ pub(crate) async fn fetch_bulk_book_details(books: &Vec<Book>) -> Vec<String> {
         .build()
         .unwrap();
 
-    let http_client = reqwest_middleware::ClientBuilder::new(reqwest_client)
+    let http_client = ClientBuilder::new(reqwest_client)
         // Inserts the extension before the request is started
         .with_init(Extension(reqwest_tracing::OtelName("backend-client".into())))
         // Trace HTTP requests. See the tracing crate to make use of these traces.
