@@ -1,4 +1,4 @@
-GET http://localhost:3000/books/
+DEBUGGET http://localhost:8000/books/
 Accept: application/json
 
 <> 2024-07-18T112331.200.json
@@ -9,7 +9,7 @@ Accept: application/json
 
 ###
 
-GET http://localhost:3000/books/3
+GET http://localhost:8001/books/10
 Accept: application/json
 
 <> 2024-01-30T090841.200.json
