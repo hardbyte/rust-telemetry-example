@@ -5,20 +5,19 @@ use axum::extract::{Path, Query};
 use axum::routing::{delete, get, patch, post};
 use opentelemetry::trace::TraceContextExt;
 use sqlx::SqlitePool;
-use tracing::{debug, info};
+use tracing::{debug, info, Level};
 use crate::db;
 use crate::db::{Book, BookCreateIn};
 
 
 
 
-//#[tracing::instrument(skip(con), fields(num_books))]
+#[tracing::instrument(skip(con), fields(num_books))]
 async fn get_all_books(
     Extension(con): Extension<SqlitePool>,
 ) -> Result<Json<Vec<Book>>, StatusCode> {
 
     info!("Getting all books info level");
-
 
     if let Ok(books) = db::get_all_books(&con).await {
 
@@ -35,7 +34,7 @@ async fn get_all_books(
     }
 }
 
-#[tracing::instrument(skip(con))]
+#[tracing::instrument(skip(con), ret(level = Level::TRACE))]
 async fn get_book(
     Extension(con): Extension<SqlitePool>,
     Path(id): Path<i32>

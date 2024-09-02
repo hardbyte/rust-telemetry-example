@@ -19,8 +19,6 @@ pub(crate) async fn fetch_bulk_book_details(books: &Vec<Book>) -> Vec<String> {
         .with(TracingMiddleware::default())
         .build();
 
-    let outer_trace_id = tracing_opentelemetry_instrumentation_sdk::find_current_trace_id();
-    debug!("Outer trace id: {}", outer_trace_id.unwrap_or("not-set".into()));
 
     // Run each query to backend sequentially (should propagate context):
     let mut seq_book_details = Vec::new();

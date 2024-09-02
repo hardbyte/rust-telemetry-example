@@ -23,11 +23,10 @@ tower-http = { version = "0.5.2", features = ["trace"] }
 tracing = { version = "0.1.40" }
 tracing-opentelemetry = { version = "0.25.0" , features=["async-trait"]}
 tracing-subscriber = { version = "0.3.18", features=["fmt", "env-filter", "json", "tracing-log"] }
-reqwest = "0.12.5"
+reqwest = "0.12.7"
 reqwest-middleware = { version="0.3.3", features = ["json"] }
 reqwest-tracing = { version="0.5.3",  features = ["opentelemetry_0_24"] }
 futures = "0.3.30"
-axum-tracing-opentelemetry = { git = "https://github.com/hardbyte/tracing-opentelemetry-instrumentation-sdk", rev="89ccf9779831df70b539688efb735440414ce9ca" }
-#axum-tracing-opentelemetry = { version = "0.19.0", features = [] }
-tracing-opentelemetry-instrumentation-sdk = { git = "https://github.com/hardbyte/tracing-opentelemetry-instrumentation-sdk", rev="89ccf9779831df70b539688efb735440414ce9ca", features = ["tracing_level_info"] }
+axum-tracing-opentelemetry = { version = "0.19.1" }
+tracing-opentelemetry-instrumentation-sdk = { version = "0.19.1", features = ["tracing_level_info"] }
 
