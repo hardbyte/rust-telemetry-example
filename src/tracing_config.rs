@@ -1,3 +1,4 @@
+use opentelemetry::trace::TracerProvider;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{
@@ -17,11 +18,15 @@ pub fn init_tracing() {
         .tracing()
         .with_exporter(exporter)
         .with_trace_config(
-            opentelemetry_sdk::trace::config()
+            opentelemetry_sdk::trace::Config::default()
                 .with_resource(opentelemetry_sdk::Resource::default()),
         )
         .install_batch(opentelemetry_sdk::runtime::Tokio)
         .expect("Failed to create tracer provider");
+
+    // Explicitly set the tracer provider globally. Note this is now required
+    // https://github.com/open-telemetry/opentelemetry-rust/blob/main/opentelemetry-otlp/CHANGELOG.md#v0170
+    opentelemetry::global::set_tracer_provider(tracer_provider.clone());
 
     // Filter the tracing layer - we can add custom filters that only impact the tracing layer
     let tracing_level_filter = tracing_subscriber::filter::Targets::new()
@@ -32,12 +37,12 @@ pub fn init_tracing() {
         .with_target("hyper_util", tracing::Level::INFO)
         .with_target("h2", tracing::Level::WARN)
         // Note an optional feature flag crate sets this most important trace from tracing to info level
-        .with_target("otel::tracing", tracing::Level::TRACE)
-        .with_default(tracing::Level::DEBUG);
+        .with_target("otel::tracing", tracing::Level::INFO)
+        .with_default(tracing::Level::INFO);
 
     // turn our OTLP pipeline into a tracing layer
     let tracing_opentelemetry_layer = tracing_opentelemetry::layer()
-        .with_tracer(tracer_provider)
+        .with_tracer(tracer_provider.tracer("bookapp"))
         .with_filter(tracing_level_filter);
 
     // Configure the stdout fmt layer

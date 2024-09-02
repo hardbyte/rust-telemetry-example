@@ -1,17 +1,18 @@
 use axum::http::StatusCode;
-use axum::{Extension, extract, Json, Router};
-
+use axum::{Extension, extract, Json, Router, http::Request};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use axum::extract::{Path, Query};
 use axum::routing::{delete, get, patch, post};
+use opentelemetry::trace::TraceContextExt;
 use sqlx::SqlitePool;
-use tracing::{debug, info};
+use tracing::{debug, info, Level};
 use crate::db;
 use crate::db::{Book, BookCreateIn};
 
 
 
 
-//#[tracing::instrument(skip(con), fields(num_books))]
+#[tracing::instrument(skip(con), fields(num_books))]
 async fn get_all_books(
     Extension(con): Extension<SqlitePool>,
 ) -> Result<Json<Vec<Book>>, StatusCode> {
@@ -33,14 +34,21 @@ async fn get_all_books(
     }
 }
 
-#[tracing::instrument(skip(con))]
+#[tracing::instrument(skip(con), ret(level = Level::TRACE))]
 async fn get_book(
     Extension(con): Extension<SqlitePool>,
     Path(id): Path<i32>
 ) -> Result<Json<Book>, StatusCode> {
 
     let trace_id = tracing_opentelemetry_instrumentation_sdk::find_current_trace_id();
-    debug!("trace id: {}", trace_id.unwrap());
+    debug!("trace id according to tracing_opentelemetry_instrumentation: {}", trace_id.unwrap_or("not-set".into()));
+
+
+    let span = tracing::Span::current();
+    let otel_context = span.context();
+    let trace_id2 = otel_context.span().span_context().trace_id().to_string();
+
+    debug!("trace id from tracing: {}", trace_id2);
 
     if let Ok(book) = db::get_book(&con, id).await {
         Ok(Json(book))
@@ -94,29 +102,4 @@ pub fn book_service() -> Router {
         .route("/:id", patch(update_book))
         .route("/add", post(create_book))
         .route("/:id", delete(delete_book))
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    use axum_test_helper::TestClient;
-    use crate::db::init_db;
-
-    // async fn setup_tests() -> TestClient {
-    //     dotenv::dotenv().ok();
-    //     let con = init_db().await.unwrap();
-    //     let app = crate::router(con);
-    //     TestClient::new(app)
-    // }
-
-    // #[tokio::test]
-    // async fn test_get_all_books() {
-    //     let client = setup_tests().await;
-    //     let res = client.get("/books").send().await;
-    //     assert_eq!(res.status(), StatusCode::OK);
-    //     let books = res.json().await;
-    //     assert!(!books.is_empty());
-    //
-    // }
 }

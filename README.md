@@ -10,6 +10,6 @@ Accept: application/json
 
 ```
 
-Open Grafana at localhost:3000 and login with admin:admin
+Open Grafana at localhost:3000 and login with `admin:admin`
 
 ![img.png](.github/img.png)
