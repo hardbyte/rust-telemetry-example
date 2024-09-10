@@ -1,8 +1,8 @@
 #![allow(clippy::all)]
 #[allow(unused_imports)]
-pub use progenitor_client::{ByteStream, Error, ResponseValue};
-#[allow(unused_imports)]
 use progenitor_client::{encode_path, RequestBuilderExt};
+#[allow(unused_imports)]
+pub use progenitor_client::{ByteStream, Error, ResponseValue};
 #[allow(unused_imports)]
 use reqwest::header::{HeaderMap, HeaderValue};
 /// Types used as operation parameters and responses.
@@ -14,22 +14,16 @@ pub mod types {
     /// Error types.
     pub mod error {
         /// Error from a TryFrom or FromStr implementation.
-        pub struct ConversionError(std::borrow::Cow<'static, str>);
-        impl std::error::Error for ConversionError {}
-        impl std::fmt::Display for ConversionError {
-            fn fmt(
-                &self,
-                f: &mut std::fmt::Formatter<'_>,
-            ) -> Result<(), std::fmt::Error> {
-                std::fmt::Display::fmt(&self.0, f)
+        pub struct ConversionError(::std::borrow::Cow<'static, str>);
+        impl ::std::error::Error for ConversionError {}
+        impl ::std::fmt::Display for ConversionError {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> Result<(), ::std::fmt::Error> {
+                ::std::fmt::Display::fmt(&self.0, f)
             }
         }
-        impl std::fmt::Debug for ConversionError {
-            fn fmt(
-                &self,
-                f: &mut std::fmt::Formatter<'_>,
-            ) -> Result<(), std::fmt::Error> {
-                std::fmt::Debug::fmt(&self.0, f)
+        impl ::std::fmt::Debug for ConversionError {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> Result<(), ::std::fmt::Error> {
+                ::std::fmt::Debug::fmt(&self.0, f)
             }
         }
         impl From<&'static str> for ConversionError {
@@ -73,7 +67,7 @@ pub mod types {
     ///}
     /// ```
     /// </details>
-    #[derive(Clone, Debug, Deserialize, Serialize)]
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
     pub struct Book {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub author: Option<String>,
@@ -116,7 +110,7 @@ pub mod types {
     ///}
     /// ```
     /// </details>
-    #[derive(Clone, Debug, Deserialize, Serialize)]
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
     pub struct BookCreateIn {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub author: Option<String>,
@@ -158,9 +152,7 @@ pub mod types {
             {
                 self.author = value
                     .try_into()
-                    .map_err(|e| {
-                        format!("error converting supplied value for author: {}", e)
-                    });
+                    .map_err(|e| format!("error converting supplied value for author: {}", e));
                 self
             }
             pub fn id<T>(mut self, value: T) -> Self
@@ -170,9 +162,7 @@ pub mod types {
             {
                 self.id = value
                     .try_into()
-                    .map_err(|e| {
-                        format!("error converting supplied value for id: {}", e)
-                    });
+                    .map_err(|e| format!("error converting supplied value for id: {}", e));
                 self
             }
             pub fn title<T>(mut self, value: T) -> Self
@@ -182,9 +172,7 @@ pub mod types {
             {
                 self.title = value
                     .try_into()
-                    .map_err(|e| {
-                        format!("error converting supplied value for title: {}", e)
-                    });
+                    .map_err(|e| format!("error converting supplied value for title: {}", e));
                 self
             }
         }
@@ -228,9 +216,7 @@ pub mod types {
             {
                 self.author = value
                     .try_into()
-                    .map_err(|e| {
-                        format!("error converting supplied value for author: {}", e)
-                    });
+                    .map_err(|e| format!("error converting supplied value for author: {}", e));
                 self
             }
             pub fn title<T>(mut self, value: T) -> Self
@@ -240,17 +226,13 @@ pub mod types {
             {
                 self.title = value
                     .try_into()
-                    .map_err(|e| {
-                        format!("error converting supplied value for title: {}", e)
-                    });
+                    .map_err(|e| format!("error converting supplied value for title: {}", e));
                 self
             }
         }
         impl std::convert::TryFrom<BookCreateIn> for super::BookCreateIn {
             type Error = super::error::ConversionError;
-            fn try_from(
-                value: BookCreateIn,
-            ) -> Result<Self, super::error::ConversionError> {
+            fn try_from(value: BookCreateIn) -> Result<Self, super::error::ConversionError> {
                 Ok(Self {
                     author: value.author?,
                     title: value.title?,
@@ -276,6 +258,7 @@ Version: 1.0.0*/
 pub struct Client {
     pub(crate) baseurl: String,
     pub(crate) client: reqwest::Client,
+    pub(crate) inner: crate::ClientState,
 }
 impl Client {
     /// Create a new client.
@@ -283,15 +266,17 @@ impl Client {
     /// `baseurl` is the base URL provided to the internal
     /// `reqwest::Client`, and should include a scheme and hostname,
     /// as well as port and a path stem if applicable.
-    pub fn new(baseurl: &str) -> Self {
+    pub fn new(baseurl: &str, inner: crate::ClientState) -> Self {
         #[cfg(not(target_arch = "wasm32"))]
         let client = {
             let dur = std::time::Duration::from_secs(15);
-            reqwest::ClientBuilder::new().connect_timeout(dur).timeout(dur)
+            reqwest::ClientBuilder::new()
+                .connect_timeout(dur)
+                .timeout(dur)
         };
         #[cfg(target_arch = "wasm32")]
         let client = reqwest::ClientBuilder::new();
-        Self::new_with_client(baseurl, client.build().unwrap())
+        Self::new_with_client(baseurl, client.build().unwrap(), inner)
     }
     /// Construct a new client with an existing `reqwest::Client`,
     /// allowing more control over its configuration.
@@ -299,10 +284,15 @@ impl Client {
     /// `baseurl` is the base URL provided to the internal
     /// `reqwest::Client`, and should include a scheme and hostname,
     /// as well as port and a path stem if applicable.
-    pub fn new_with_client(baseurl: &str, client: reqwest::Client) -> Self {
+    pub fn new_with_client(
+        baseurl: &str,
+        client: reqwest::Client,
+        inner: crate::ClientState,
+    ) -> Self {
         Self {
             baseurl: baseurl.to_string(),
             client,
+            inner,
         }
     }
     /// Get the base URL to which requests are made.
@@ -320,79 +310,83 @@ impl Client {
     pub fn api_version(&self) -> &'static str {
         "1.0.0"
     }
+    /// Return a reference to the inner type stored in `self`.
+    pub fn inner(&self) -> &crate::ClientState {
+        &self.inner
+    }
 }
 impl Client {
     /**Get all books
 
-Sends a `GET` request to `/books/`
+    Sends a `GET` request to `/books/`
 
-```ignore
-let response = client.get_all_books()
-    .send()
-    .await;
-```*/
+    ```ignore
+    let response = client.get_all_books()
+        .send()
+        .await;
+    ```*/
     pub fn get_all_books(&self) -> builder::GetAllBooks {
         builder::GetAllBooks::new(self)
     }
     /**Create a new book
 
-Sends a `POST` request to `/books/add`
+    Sends a `POST` request to `/books/add`
 
-Arguments:
-- `body`: Data for the new book
-```ignore
-let response = client.create_book()
-    .body(body)
-    .send()
-    .await;
-```*/
+    Arguments:
+    - `body`: Data for the new book
+    ```ignore
+    let response = client.create_book()
+        .body(body)
+        .send()
+        .await;
+    ```*/
     pub fn create_book(&self) -> builder::CreateBook {
         builder::CreateBook::new(self)
     }
     /**Get a book by ID
 
-Sends a `GET` request to `/books/{id}`
+    Sends a `GET` request to `/books/{id}`
 
-Arguments:
-- `id`: ID of the book
-```ignore
-let response = client.get_book()
-    .id(id)
-    .send()
-    .await;
-```*/
+    Arguments:
+    - `id`: ID of the book
+    ```ignore
+    let response = client.get_book()
+        .id(id)
+        .send()
+        .await;
+    ```*/
     pub fn get_book(&self) -> builder::GetBook {
         builder::GetBook::new(self)
     }
     /**Delete a book by ID
 
-Sends a `DELETE` request to `/books/{id}`
+    Sends a `DELETE` request to `/books/{id}`
 
-Arguments:
-- `id`: ID of the book
-```ignore
-let response = client.delete_book()
-    .id(id)
-    .send()
-    .await;
-```*/
+    Arguments:
+    - `id`: ID of the book
+    ```ignore
+    let response = client.delete_book()
+        .id(id)
+        .send()
+        .await;
+    ```*/
     pub fn delete_book(&self) -> builder::DeleteBook {
         builder::DeleteBook::new(self)
     }
     /**Update a book by ID
 
-Sends a `PATCH` request to `/books/{id}`
+    Sends a `PATCH` request to `/books/{id}`
 
-Arguments:
-- `id`: ID of the book
-- `body`: Data to update the book
-```ignore
-let response = client.update_book()
-    .id(id)
-    .body(body)
-    .send()
-    .await;
-```*/
+    Arguments:
+    - `id`: ID of the book
+    - `body`: Data to update the book
+    ```ignore
+    let response = client.update_book()
+        .id(id)
+        .body(body)
+        .send()
+        .await;
+    ```*/
     pub fn update_book(&self) -> builder::UpdateBook {
         builder::UpdateBook::new(self)
     }
@@ -403,12 +397,11 @@ pub mod builder {
     use super::types;
     #[allow(unused_imports)]
     use super::{
-        encode_path, ByteStream, Error, HeaderMap, HeaderValue, RequestBuilderExt,
-        ResponseValue,
+        encode_path, ByteStream, Error, HeaderMap, HeaderValue, RequestBuilderExt, ResponseValue,
     };
     /**Builder for [`Client::get_all_books`]
 
-[`Client::get_all_books`]: super::Client::get_all_books*/
+    [`Client::get_all_books`]: super::Client::get_all_books*/
     #[derive(Debug, Clone)]
     pub struct GetAllBooks<'a> {
         client: &'a super::Client,
@@ -434,7 +427,7 @@ pub mod builder {
                 crate::inject_opentelemetry_context_into_request(request);
                 Box::pin(async { Ok::<_, Box<dyn std::error::Error>>(()) })
             })(&client.inner, &mut request)
-                .await
+            .await
             {
                 Ok(_) => {}
                 Err(e) => return Err(Error::PreHookError(e.to_string())),
@@ -450,7 +443,7 @@ pub mod builder {
     }
     /**Builder for [`Client::create_book`]
 
-[`Client::create_book`]: super::Client::create_book*/
+    [`Client::create_book`]: super::Client::create_book*/
     #[derive(Debug, Clone)]
     pub struct CreateBook<'a> {
         client: &'a super::Client,
@@ -471,16 +464,12 @@ pub mod builder {
             self.body = value
                 .try_into()
                 .map(From::from)
-                .map_err(|s| {
-                    format!("conversion to `BookCreateIn` for body failed: {}", s)
-                });
+                .map_err(|s| format!("conversion to `BookCreateIn` for body failed: {}", s));
             self
         }
         pub fn body_map<F>(mut self, f: F) -> Self
         where
-            F: std::ops::FnOnce(
-                types::builder::BookCreateIn,
-            ) -> types::builder::BookCreateIn,
+            F: std::ops::FnOnce(types::builder::BookCreateIn) -> types::builder::BookCreateIn,
         {
             self.body = self.body.map(f);
             self
@@ -489,9 +478,7 @@ pub mod builder {
         pub async fn send(self) -> Result<ResponseValue<i64>, Error<()>> {
             let Self { client, body } = self;
             let body = body
-                .and_then(|v| {
-                    types::BookCreateIn::try_from(v).map_err(|e| e.to_string())
-                })
+                .and_then(|v| types::BookCreateIn::try_from(v).map_err(|e| e.to_string()))
                 .map_err(Error::InvalidRequest)?;
             let url = format!("{}/books/add", client.baseurl,);
             #[allow(unused_mut)]
@@ -508,7 +495,7 @@ pub mod builder {
                 crate::inject_opentelemetry_context_into_request(request);
                 Box::pin(async { Ok::<_, Box<dyn std::error::Error>>(()) })
             })(&client.inner, &mut request)
-                .await
+            .await
             {
                 Ok(_) => {}
                 Err(e) => return Err(Error::PreHookError(e.to_string())),
@@ -524,7 +511,7 @@ pub mod builder {
     }
     /**Builder for [`Client::get_book`]
 
-[`Client::get_book`]: super::Client::get_book*/
+    [`Client::get_book`]: super::Client::get_book*/
     #[derive(Debug, Clone)]
     pub struct GetBook<'a> {
         client: &'a super::Client,
@@ -550,9 +537,7 @@ pub mod builder {
         pub async fn send(self) -> Result<ResponseValue<types::Book>, Error<()>> {
             let Self { client, id } = self;
             let id = id.map_err(Error::InvalidRequest)?;
-            let url = format!(
-                "{}/books/{}", client.baseurl, encode_path(& id.to_string()),
-            );
+            let url = format!("{}/books/{}", client.baseurl, encode_path(&id.to_string()),);
             #[allow(unused_mut)]
             let mut request = client
                 .client
@@ -566,7 +551,7 @@ pub mod builder {
                 crate::inject_opentelemetry_context_into_request(request);
                 Box::pin(async { Ok::<_, Box<dyn std::error::Error>>(()) })
             })(&client.inner, &mut request)
-                .await
+            .await
             {
                 Ok(_) => {}
                 Err(e) => return Err(Error::PreHookError(e.to_string())),
@@ -582,7 +567,7 @@ pub mod builder {
     }
     /**Builder for [`Client::delete_book`]
 
-[`Client::delete_book`]: super::Client::delete_book*/
+    [`Client::delete_book`]: super::Client::delete_book*/
     #[derive(Debug, Clone)]
     pub struct DeleteBook<'a> {
         client: &'a super::Client,
@@ -608,16 +593,14 @@ pub mod builder {
         pub async fn send(self) -> Result<ResponseValue<()>, Error<()>> {
             let Self { client, id } = self;
             let id = id.map_err(Error::InvalidRequest)?;
-            let url = format!(
-                "{}/books/{}", client.baseurl, encode_path(& id.to_string()),
-            );
+            let url = format!("{}/books/{}", client.baseurl, encode_path(&id.to_string()),);
             #[allow(unused_mut)]
             let mut request = client.client.delete(url).build()?;
             match (|_, request: &mut reqwest::Request| {
                 crate::inject_opentelemetry_context_into_request(request);
                 Box::pin(async { Ok::<_, Box<dyn std::error::Error>>(()) })
             })(&client.inner, &mut request)
-                .await
+            .await
             {
                 Ok(_) => {}
                 Err(e) => return Err(Error::PreHookError(e.to_string())),
@@ -633,7 +616,7 @@ pub mod builder {
     }
     /**Builder for [`Client::update_book`]
 
-[`Client::update_book`]: super::Client::update_book*/
+    [`Client::update_book`]: super::Client::update_book*/
     #[derive(Debug, Clone)]
     pub struct UpdateBook<'a> {
         client: &'a super::Client,
@@ -665,16 +648,12 @@ pub mod builder {
             self.body = value
                 .try_into()
                 .map(From::from)
-                .map_err(|s| {
-                    format!("conversion to `BookCreateIn` for body failed: {}", s)
-                });
+                .map_err(|s| format!("conversion to `BookCreateIn` for body failed: {}", s));
             self
         }
         pub fn body_map<F>(mut self, f: F) -> Self
         where
-            F: std::ops::FnOnce(
-                types::builder::BookCreateIn,
-            ) -> types::builder::BookCreateIn,
+            F: std::ops::FnOnce(types::builder::BookCreateIn) -> types::builder::BookCreateIn,
         {
             self.body = self.body.map(f);
             self
@@ -684,13 +663,9 @@ pub mod builder {
             let Self { client, id, body } = self;
             let id = id.map_err(Error::InvalidRequest)?;
             let body = body
-                .and_then(|v| {
-                    types::BookCreateIn::try_from(v).map_err(|e| e.to_string())
-                })
+                .and_then(|v| types::BookCreateIn::try_from(v).map_err(|e| e.to_string()))
                 .map_err(Error::InvalidRequest)?;
-            let url = format!(
-                "{}/books/{}", client.baseurl, encode_path(& id.to_string()),
-            );
+            let url = format!("{}/books/{}", client.baseurl, encode_path(&id.to_string()),);
             #[allow(unused_mut)]
             let mut request = client
                 .client
@@ -705,7 +680,7 @@ pub mod builder {
                 crate::inject_opentelemetry_context_into_request(request);
                 Box::pin(async { Ok::<_, Box<dyn std::error::Error>>(()) })
             })(&client.inner, &mut request)
-                .await
+            .await
             {
                 Ok(_) => {}
                 Err(e) => return Err(Error::PreHookError(e.to_string())),

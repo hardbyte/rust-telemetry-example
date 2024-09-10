@@ -1,6 +1,6 @@
 ARG RUST_VERSION=1.80.1
 
-FROM rust:${RUST_VERSION}-bookworm as builder
+FROM rust:${RUST_VERSION}-bookworm AS builder
 WORKDIR /usr/src/bookapp
 COPY . .
 

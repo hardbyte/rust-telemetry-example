@@ -1,7 +1,7 @@
 mod db;
 mod rest;
 mod tracing_config;
-mod client;
+mod reqwest_traced_client;
 
 use opentelemetry::global;
 

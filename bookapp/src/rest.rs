@@ -6,9 +6,10 @@ use axum::routing::{delete, get, patch, post};
 use opentelemetry::trace::TraceContextExt;
 use sqlx::SqlitePool;
 use tracing::{debug, info, Level};
-use crate::db;
+use crate::{reqwest_traced_client, db};
 use crate::db::{Book, BookCreateIn};
 
+use client::Client;
 
 
 
@@ -25,13 +26,34 @@ async fn get_all_books(
         tracing::Span::current()
             .record("num_books", &books.len());
 
-        // Fetch the book details from the backend service
-        let book_details = crate::client::fetch_bulk_book_details(&books).await;
+        // Fetch 5 book details from the backend service using reqwest-tracing client
+        //let _book_details = crate::reqwest_traced_client::fetch_bulk_book_details(&books).await;
+
+        let _book_detail_res = get_book_details_with_progenitor_client(books.first().unwrap().id)
+            .await;
+
+        tracing::info!("Got one book using progenitor");
+
 
         Ok(Json(books))
     } else {
         Err(StatusCode::SERVICE_UNAVAILABLE)
     }
+}
+
+#[tracing::instrument()]
+async fn get_book_details_with_progenitor_client(book_id: i32)
+    -> Result<client::ResponseValue<client::types::Book>, client::Error>{
+    // Fetch a single book detail using the progenitor generated client
+    let progenitor_client = client::Client::new(
+        "http://backend:8000",
+        client::ClientState::default(),
+    );
+
+    progenitor_client.get_book()
+        .id(book_id)
+        .send()
+        .await
 }
 
 #[tracing::instrument(skip(con), ret(level = Level::TRACE))]

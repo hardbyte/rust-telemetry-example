@@ -6,19 +6,19 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-
+tracing = { workspace = true }
+reqwest = { workspace = true, features = ["json", "stream"] }
+serde = { version = "1.0.210", features = ["derive", "rc"] }
+serde_json = { version = "1.0.128" }
+opentelemetry = { workspace = true}
+tracing-opentelemetry = { workspace = true, features=["async-trait"] }
+progenitor-client = { version = "0.6.0", rev = "4a3dfec3926f1f9db78eb6dc90087a1e2a1f9e45", git = "https://github.com/oxidecomputer/progenitor", package = "progenitor-client" }
 
 
 [build-dependencies]
-
-# Progenitor dependencies
+# Versions after this commit reverted from reqwest 12.x -> 11.x
+progenitor = {version = "0.6.0", rev = "4a3dfec3926f1f9db78eb6dc90087a1e2a1f9e45", git = "https://github.com/oxidecomputer/progenitor", package = "progenitor"}
 quote = "1.0.37"
-progenitor = { version = "0.7.0" }
 serde_yaml = { version = "0.9.34" }
 syn = { version = "2.0.77" }
 prettyplease = { version = "0.2.22" }
-
-# Versions after this commit reverted from reqwest 12.x -> 11.x, which is incompatible with other
-# crates in our ecosystem.
-#progenitor = { version = "0.6.0", rev = "4a3dfec3926f1f9db78eb6dc90087a1e2a1f9e45", git = "https://github.com/oxidecomputer/progenitor", package = "progenitor" }
-#progenitor-client = { version = "0.6.0", rev = "4a3dfec3926f1f9db78eb6dc90087a1e2a1f9e45", git = "https://github.com/oxidecomputer/progenitor", package = "progenitor-client" }

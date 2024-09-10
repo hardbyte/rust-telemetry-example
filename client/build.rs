@@ -1,4 +1,4 @@
-use progenitor::{GenerationSettings, Generator, InterfaceStyle, TypePatch};
+use progenitor::{GenerationSettings, Generator, InterfaceStyle};
 use quote::quote;
 use std::process::Command;
 
@@ -10,9 +10,9 @@ fn main() {
     let mut generator = Generator::new(
         GenerationSettings::new()
             .with_interface(InterfaceStyle::Builder)
-            // The version of progenitor we pinned to has an issue where
+            // Progenitor has an issue where
             // an inner type MUST be set to use with_pre_hook_async
-            //.with_inner_type(quote! { crate::ClientState })
+            .with_inner_type(quote! { crate::ClientState })
             .with_pre_hook_async(quote! {
                 |_, request: &mut reqwest::Request| {
                     // Synchronously modify the request here (e.g., add headers)

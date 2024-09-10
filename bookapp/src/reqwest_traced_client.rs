@@ -1,8 +1,6 @@
 use reqwest::{Client};
 use reqwest_middleware::{ClientBuilder, Extension};
 use reqwest_tracing::TracingMiddleware;
-use futures::future::join_all;
-use tracing::debug;
 use crate::db::Book;
 
 #[tracing::instrument(skip(books))]
