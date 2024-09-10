@@ -1,6 +1,6 @@
+use anyhow::{Context, Ok, Result};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Row, SqlitePool};
-use anyhow::{Result, Ok, Context};
 use tracing::{debug, info, info_span, span};
 // #[derive(serde::Deserialize)]
 // struct WithID<T> {
@@ -18,7 +18,6 @@ pub struct BookCreateIn {
 
 // pub type Book = WithID<BookCreateIn>;
 
-
 #[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
 pub struct Book {
     pub id: i32,
@@ -29,7 +28,7 @@ pub struct Book {
 }
 
 pub async fn init_db() -> Result<SqlitePool> {
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_|"sqlite::memory:".to_string());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite::memory:".to_string());
     info!("Connecting to database at {}", db_url);
     let con_pool = SqlitePool::connect(&db_url)
         .await
@@ -53,27 +52,26 @@ pub async fn get_all_books(connection_pool: &SqlitePool) -> Result<Vec<Book>> {
             .fetch_all(connection_pool)
             .await?,
     )
-
-
-
 }
 pub async fn get_book(connection_pool: &SqlitePool, id: i32) -> Result<Book> {
-    Ok(
-        sqlx::query_as::<_, Book>("select * from books where id=$1")
-            .bind(id)
-            .fetch_one(connection_pool)
-            .await?,
-    )
+    Ok(sqlx::query_as::<_, Book>("select * from books where id=$1")
+        .bind(id)
+        .fetch_one(connection_pool)
+        .await?)
 }
 
-pub async fn create_book(connection_pool: &SqlitePool, author: String, title: String) -> Result<i32> {
+pub async fn create_book(
+    connection_pool: &SqlitePool,
+    author: String,
+    title: String,
+) -> Result<i32> {
     Ok(
         sqlx::query("insert into books (title, author) VALUES ($1, $2) returning id")
             .bind(title)
             .bind(author)
             .fetch_one(connection_pool)
             .await?
-            .get(0)
+            .get(0),
     )
 }
 pub async fn delete_book(connection_pool: &SqlitePool, id: i32) -> Result<()> {

@@ -1,7 +1,7 @@
 mod db;
+mod reqwest_traced_client;
 mod rest;
 mod tracing_config;
-mod reqwest_traced_client;
 
 use opentelemetry::global;
 
@@ -10,19 +10,17 @@ use tracing_subscriber;
 use anyhow::{Ok, Result};
 use axum::{Extension, Router};
 use axum_tracing_opentelemetry::middleware::{OtelAxumLayer, OtelInResponseLayer};
-use tower::{ServiceBuilder};
+use tower::ServiceBuilder;
 use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 
+use crate::db::init_db;
 use sqlx::SqlitePool;
 use tracing::info;
-use crate::db::init_db;
-
 
 fn router(connection_pool: SqlitePool) -> Router {
     Router::new()
         .nest_service("/books", rest::book_service())
         .layer(Extension(connection_pool))
-
         // This layer creates a new Tracing span called "request" for each request,
         // it logs headers etc but on its own doesn't do the OTEL trace context propagation.
         // .layer(ServiceBuilder::new().layer(
@@ -32,20 +30,18 @@ fn router(connection_pool: SqlitePool) -> Router {
         //             .level(tracing::Level::INFO))
         //
         // ))
-
         // include trace context as header into the response
         .layer(OtelInResponseLayer::default())
         // start OpenTelemetry trace on incoming request
         // as long as not filtered out!
         .layer(OtelAxumLayer::default())
 
-        // Other non-traced routes can go after this:
-        //.route("/health", get(health)) // request processed without span / trace
+    // Other non-traced routes can go after this:
+    //.route("/health", get(health)) // request processed without span / trace
 }
 
-
 #[tokio::main]
-async fn main() -> Result<()>{
+async fn main() -> Result<()> {
     // Load env vars
     dotenv::dotenv().ok();
 
@@ -58,7 +54,6 @@ async fn main() -> Result<()>{
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8000").await.unwrap();
     info!("Let's rock and roll");
     axum::serve(listener, app).await.unwrap();
-
 
     // let books = get_all_books(&connection_pool).await;
     // let a_book = get_book(&connection_pool, 1).await;
