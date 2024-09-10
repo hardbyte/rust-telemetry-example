@@ -2,7 +2,11 @@
 
 A "simple" example of cross service tracing in Rust using OpenTelemetry and the Tracing crate.
 
+```shell
+docker compose build
 docker compose up
+```
+
 
 ```.http request
 GET http://localhost:8000/books

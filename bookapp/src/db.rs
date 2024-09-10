@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Row, SqlitePool};
-use anyhow::{Result, Ok};
+use anyhow::{Result, Ok, Context};
 use tracing::{debug, info, info_span, span};
 // #[derive(serde::Deserialize)]
 // struct WithID<T> {
@@ -29,10 +29,18 @@ pub struct Book {
 }
 
 pub async fn init_db() -> Result<SqlitePool> {
-    let db_url = std::env::var("DATABASE_URL").unwrap_or("sqlite::memory:".to_string());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_|"sqlite::memory:".to_string());
     info!("Connecting to database at {}", db_url);
-    let con_pool = SqlitePool::connect(&db_url).await?;
-    sqlx::migrate!().run(&con_pool).await?;
+    let con_pool = SqlitePool::connect(&db_url)
+        .await
+        .context("Failed to connect to the database")?;
+
+    debug!("Running migrations");
+    sqlx::migrate!()
+        .run(&con_pool)
+        .await
+        .context("Failed to run migrations")?;
+
     Ok(con_pool)
 }
 

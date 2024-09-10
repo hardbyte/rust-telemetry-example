@@ -4,7 +4,7 @@ FROM rust:${RUST_VERSION}-bookworm as builder
 WORKDIR /usr/src/bookapp
 COPY . .
 
-RUN cargo install --path .
+RUN cargo install --path bookapp
 
 FROM debian:12.6
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget && rm -rf /var/lib/apt/lists/*
