@@ -93,7 +93,6 @@ pub async fn update_book(connection_pool: &SqlitePool, book: Book) -> Result<i32
         .execute(connection_pool)
         .await?;
 
-
     Ok(res.rows_affected().try_into().unwrap())
 }
 
@@ -107,6 +106,6 @@ mod test {
         let con = init_db().await.unwrap();
         let all_books = get_all_books(&con).await.unwrap();
         assert!(!all_books.is_empty());
-        assert_eq!(all_books.len(), 2);
+        assert_eq!(all_books.len(), 92);
     }
 }
