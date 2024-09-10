@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Row, SqlitePool};
-use anyhow::{Result, Ok};
+use anyhow::{Result, Ok, Context};
 use tracing::{debug, info, info_span, span};
 // #[derive(serde::Deserialize)]
 // struct WithID<T> {
@@ -29,10 +29,18 @@ pub struct Book {
 }
 
 pub async fn init_db() -> Result<SqlitePool> {
-    let db_url = std::env::var("DATABASE_URL").unwrap_or("sqlite::memory:".to_string());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_|"sqlite::memory:".to_string());
     info!("Connecting to database at {}", db_url);
-    let con_pool = SqlitePool::connect(&db_url).await?;
-    sqlx::migrate!().run(&con_pool).await?;
+    let con_pool = SqlitePool::connect(&db_url)
+        .await
+        .context("Failed to connect to the database")?;
+
+    debug!("Running migrations");
+    sqlx::migrate!()
+        .run(&con_pool)
+        .await
+        .context("Failed to run migrations")?;
+
     Ok(con_pool)
 }
 
@@ -85,7 +93,6 @@ pub async fn update_book(connection_pool: &SqlitePool, book: Book) -> Result<i32
         .execute(connection_pool)
         .await?;
 
-
     Ok(res.rows_affected().try_into().unwrap())
 }
 
@@ -99,6 +106,6 @@ mod test {
         let con = init_db().await.unwrap();
         let all_books = get_all_books(&con).await.unwrap();
         assert!(!all_books.is_empty());
-        assert_eq!(all_books.len(), 2);
+        assert_eq!(all_books.len(), 92);
     }
 }

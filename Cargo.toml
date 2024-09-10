@@ -1,32 +1,6 @@
-[package]
-name = "bookapp"
-version = "0.1.0"
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-anyhow = "1.0.86"
-axum = { version = "0.7.5", features=["json"] }
-dotenv = "0.15.0"
-opentelemetry = "0.24.0"
-opentelemetry-otlp = { version="0.17.0" , features = [
-    "serialize",
-    "reqwest-client",
-]}
-opentelemetry_sdk = { version="0.24.1", features = ["trace", "opentelemetry-http", "rt-tokio"]}
-serde = "1.0.196"
-sqlx = { version = "0.8.0", features = ["runtime-tokio", "sqlite"] }
-tokio = { version = "1.39.2", features = ["full"] }
-tower = "0.4.13"
-tower-http = { version = "0.5.2", features = ["trace"] }
-tracing = { version = "0.1.40" }
-tracing-opentelemetry = { version = "0.25.0" , features=["async-trait"]}
-tracing-subscriber = { version = "0.3.18", features=["fmt", "env-filter", "json", "tracing-log"] }
-reqwest = "0.12.7"
-reqwest-middleware = { version="0.3.3", features = ["json"] }
-reqwest-tracing = { version="0.5.3",  features = ["opentelemetry_0_24"] }
-futures = "0.3.30"
-axum-tracing-opentelemetry = { version = "0.19.1" }
-tracing-opentelemetry-instrumentation-sdk = { version = "0.19.1", features = ["tracing_level_info"] }
-
+[workspace]
+resolver = "2"
+members = [
+    "client",
+    "bookapp",
+]
