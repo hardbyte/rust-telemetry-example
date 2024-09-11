@@ -19,8 +19,8 @@ opentelemetry-otlp = { version="0.17.0" , features = [
 opentelemetry_sdk = { version="0.24.1", features = ["trace", "opentelemetry-http", "rt-tokio"]}
 serde = "1.0.196"
 sqlx = { version = "0.8.0", features = ["runtime-tokio", "sqlite"] }
-tokio = { version = "1.39.2", features = ["full"] }
-tower = "0.4.13"
+tokio = { version = "1.38.1", features = ["full"] }
+tower = "0.5.1"
 tower-http = { version = "0.5.2", features = ["trace"] }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true , features=["async-trait"]}

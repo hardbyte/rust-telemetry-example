@@ -17,6 +17,7 @@ pub fn init_tracing() {
             opentelemetry_sdk::trace::Config::default()
                 .with_resource(opentelemetry_sdk::Resource::default()),
         )
+        // a batch exporter is recommended as the simple exporter will export each span synchronously on dropping
         .install_batch(opentelemetry_sdk::runtime::Tokio)
         .expect("Failed to create tracer provider");
 
