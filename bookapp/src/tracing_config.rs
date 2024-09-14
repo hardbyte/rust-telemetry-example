@@ -1,18 +1,14 @@
 use opentelemetry::trace::TracerProvider;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::{
-    Layer
-};
+use tracing_subscriber::Layer;
 
 pub fn init_tracing() {
-
     opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
 
     // Uses OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
     // Assumes a GRPC endpoint (e.g port 4317)
-    let exporter = opentelemetry_otlp::new_exporter()
-        .tonic();
+    let exporter = opentelemetry_otlp::new_exporter().tonic();
 
     let tracer_provider = opentelemetry_otlp::new_pipeline()
         .tracing()
@@ -21,6 +17,7 @@ pub fn init_tracing() {
             opentelemetry_sdk::trace::Config::default()
                 .with_resource(opentelemetry_sdk::Resource::default()),
         )
+        // a batch exporter is recommended as the simple exporter will export each span synchronously on dropping
         .install_batch(opentelemetry_sdk::runtime::Tokio)
         .expect("Failed to create tracer provider");
 
@@ -53,7 +50,5 @@ pub fn init_tracing() {
         .with(tracing_opentelemetry_layer);
 
     // Set the subscriber as the global default
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("Failed to set subscriber");
-
+    tracing::subscriber::set_global_default(subscriber).expect("Failed to set subscriber");
 }

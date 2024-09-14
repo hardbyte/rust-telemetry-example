@@ -1,32 +1,33 @@
-use axum::http::StatusCode;
-use axum::{Extension, extract, Json, Router, http::Request};
-use tracing_opentelemetry::OpenTelemetrySpanExt;
+use crate::db::{Book, BookCreateIn};
+use crate::{db, reqwest_traced_client};
 use axum::extract::{Path, Query};
+use axum::http::StatusCode;
 use axum::routing::{delete, get, patch, post};
+use axum::{extract, http::Request, Extension, Json, Router};
 use opentelemetry::trace::TraceContextExt;
 use sqlx::SqlitePool;
 use tracing::{debug, info, Level};
-use crate::db;
-use crate::db::{Book, BookCreateIn};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-
-
+use client::Client;
 
 #[tracing::instrument(skip(con), fields(num_books))]
 async fn get_all_books(
     Extension(con): Extension<SqlitePool>,
 ) -> Result<Json<Vec<Book>>, StatusCode> {
-
     info!("Getting all books info level");
 
     if let Ok(books) = db::get_all_books(&con).await {
-
         // Now let's add an attribute to the tracing span with the number of books
-        tracing::Span::current()
-            .record("num_books", &books.len());
+        tracing::Span::current().record("num_books", &books.len());
 
-        // Fetch the book details from the backend service
-        let book_details = crate::client::fetch_bulk_book_details(&books).await;
+        // Fetch 5 book details from the backend service using reqwest-tracing client
+        //let _book_details = crate::reqwest_traced_client::fetch_bulk_book_details(&books).await;
+
+        let _book_detail_res =
+            get_book_details_with_progenitor_client(books.first().unwrap().id).await;
+
+        tracing::info!("Got one book using progenitor");
 
         Ok(Json(books))
     } else {
@@ -34,15 +35,26 @@ async fn get_all_books(
     }
 }
 
+#[tracing::instrument()]
+async fn get_book_details_with_progenitor_client(
+    book_id: i32,
+) -> Result<client::ResponseValue<client::types::Book>, client::Error> {
+    // Fetch a single book detail using the progenitor generated client
+    let progenitor_client = Client::new("http://backend:8000", client::ClientState::default());
+
+    progenitor_client.get_book().id(book_id).send().await
+}
+
 #[tracing::instrument(skip(con), ret(level = Level::TRACE))]
 async fn get_book(
     Extension(con): Extension<SqlitePool>,
-    Path(id): Path<i32>
+    Path(id): Path<i32>,
 ) -> Result<Json<Book>, StatusCode> {
-
     let trace_id = tracing_opentelemetry_instrumentation_sdk::find_current_trace_id();
-    debug!("trace id according to tracing_opentelemetry_instrumentation: {}", trace_id.unwrap_or("not-set".into()));
-
+    debug!(
+        "trace id according to tracing_opentelemetry_instrumentation: {}",
+        trace_id.unwrap_or("not-set".into())
+    );
 
     let span = tracing::Span::current();
     let otel_context = span.context();
@@ -60,7 +72,7 @@ async fn get_book(
 #[tracing::instrument(skip(con))]
 async fn delete_book(
     Extension(con): Extension<SqlitePool>,
-    Path(id): Path<i32>
+    Path(id): Path<i32>,
 ) -> Result<(), StatusCode> {
     if let Ok(book) = db::delete_book(&con, id).await {
         Ok(())
@@ -75,7 +87,11 @@ async fn update_book(
     Path(id): Path<i32>,
     extract::Json(book_data): extract::Json<BookCreateIn>,
 ) -> Result<Json<i32>, StatusCode> {
-    let book = Book { id, author: book_data.author, title: book_data.title };
+    let book = Book {
+        id,
+        author: book_data.author,
+        title: book_data.title,
+    };
     if let Ok(id) = db::update_book(&con, book).await {
         Ok(Json(id))
     } else {

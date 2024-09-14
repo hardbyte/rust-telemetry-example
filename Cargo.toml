@@ -4,3 +4,10 @@ members = [
     "client",
     "bookapp",
 ]
+
+[workspace.dependencies]
+
+reqwest = "0.12.7"
+opentelemetry = "0.24.0"
+tracing = { version = "0.1.40" }
+tracing-opentelemetry = { version = "0.25.0" }
