@@ -4,18 +4,18 @@ use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::routing::{delete, get, patch, post};
 use axum::{extract, http::Request, Extension, Json, Router};
+
 use opentelemetry::trace::TraceContextExt;
-use sqlx::SqlitePool;
-use tracing::{debug, info, Level};
+use rdkafka::producer::FutureProducer;
+use sqlx::PgPool;
+use tracing::{debug, info, Instrument, Level};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use client::Client;
 
 #[tracing::instrument(skip(con), fields(num_books))]
-async fn get_all_books(
-    Extension(con): Extension<SqlitePool>,
-) -> Result<Json<Vec<Book>>, StatusCode> {
-    info!("Getting all books info level");
+async fn get_all_books(Extension(con): Extension<PgPool>) -> Result<Json<Vec<Book>>, StatusCode> {
+    info!("Getting all books");
 
     if let Ok(books) = db::get_all_books(&con).await {
         // Now let's add an attribute to the tracing span with the number of books
@@ -26,8 +26,20 @@ async fn get_all_books(
 
         let _book_detail_res =
             get_book_details_with_progenitor_client(books.first().unwrap().id).await;
+        let span = tracing::info_span!("tokio_spawned_requests");
 
-        tracing::info!("Got one book using progenitor");
+        let book_details_futures = books
+            .iter()
+            .take(5)
+            .map(|b: &Book| b.id)
+            .map(|id| {
+                tokio::spawn(get_book_details_with_progenitor_client(id).instrument(span.clone()))
+            })
+            .collect::<Vec<_>>();
+
+        let _all_book_details = futures::future::join_all(book_details_futures).await;
+
+        tracing::info!("Got all book details using progenitor");
 
         Ok(Json(books))
     } else {
@@ -47,7 +59,7 @@ async fn get_book_details_with_progenitor_client(
 
 #[tracing::instrument(skip(con), ret(level = Level::TRACE))]
 async fn get_book(
-    Extension(con): Extension<SqlitePool>,
+    Extension(con): Extension<PgPool>,
     Path(id): Path<i32>,
 ) -> Result<Json<Book>, StatusCode> {
     let trace_id = tracing_opentelemetry_instrumentation_sdk::find_current_trace_id();
@@ -71,10 +83,10 @@ async fn get_book(
 
 #[tracing::instrument(skip(con))]
 async fn delete_book(
-    Extension(con): Extension<SqlitePool>,
+    Extension(con): Extension<PgPool>,
     Path(id): Path<i32>,
 ) -> Result<(), StatusCode> {
-    if let Ok(book) = db::delete_book(&con, id).await {
+    if let Ok(_book) = db::delete_book(&con, id).await {
         Ok(())
     } else {
         Err(StatusCode::NOT_FOUND)
@@ -83,7 +95,7 @@ async fn delete_book(
 
 #[tracing::instrument(skip(con))]
 async fn update_book(
-    Extension(con): Extension<SqlitePool>,
+    Extension(con): Extension<PgPool>,
     Path(id): Path<i32>,
     extract::Json(book_data): extract::Json<BookCreateIn>,
 ) -> Result<Json<i32>, StatusCode> {
@@ -99,15 +111,37 @@ async fn update_book(
     }
 }
 
-#[tracing::instrument(skip(con))]
+#[tracing::instrument(skip(con, producer))]
 async fn create_book(
-    Extension(con): Extension<SqlitePool>,
-    extract::Json(book): extract::Json<BookCreateIn>,
+    Extension(con): Extension<PgPool>,
+    Extension(producer): Extension<FutureProducer>,
+    Json(book): extract::Json<BookCreateIn>,
 ) -> Result<Json<i32>, StatusCode> {
     if let Ok(new_id) = db::create_book(&con, book.author, book.title).await {
+        queue_background_ingestion_task(&producer, new_id).await;
+
         Ok(Json(new_id))
     } else {
         Err(StatusCode::NOT_FOUND)
+    }
+}
+
+#[tracing::instrument(skip(producer), fields(otel.kind = "producer"))]
+async fn queue_background_ingestion_task(producer: &FutureProducer, new_id: i32) {
+    // Prepare message
+    let book_message = crate::book_ingestion::BookIngestionMessage { book_id: new_id };
+
+    // Get current OpenTelemetry context from the current tracing span
+    let otel_context = tracing::Span::current().context();
+
+    // Send message to Kafka
+    if let Err(e) =
+        crate::book_ingestion::send_book_ingestion_message(&producer, &book_message, &otel_context)
+            .await
+    {
+        tracing::error!("Failed to send Kafka message: {:?}", e);
+        // Set span status to error
+        tracing::Span::current().set_attribute("otel.status_code", "ERROR");
     }
 }
 

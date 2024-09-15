@@ -1,14 +1,8 @@
 use anyhow::{Context, Ok, Result};
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, Row, SqlitePool};
+use sqlx::postgres::PgPoolOptions;
+use sqlx::{FromRow, PgPool, Row};
 use tracing::{debug, info, info_span, span};
-// #[derive(serde::Deserialize)]
-// struct WithID<T> {
-//     pub(crate) id: i32,
-//
-//     #[serde(flatten)]
-//     pub(crate) inner: T,
-// }
 
 #[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
 pub struct BookCreateIn {
@@ -27,10 +21,13 @@ pub struct Book {
     pub author: String,
 }
 
-pub async fn init_db() -> Result<SqlitePool> {
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite::memory:".to_string());
+pub async fn init_db() -> Result<PgPool> {
+    let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     info!("Connecting to database at {}", db_url);
-    let con_pool = SqlitePool::connect(&db_url)
+
+    let con_pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&db_url)
         .await
         .context("Failed to connect to the database")?;
 
@@ -44,7 +41,7 @@ pub async fn init_db() -> Result<SqlitePool> {
 }
 
 #[tracing::instrument( name = "get_all_books_from_db", level = tracing::Level::DEBUG )]
-pub async fn get_all_books(connection_pool: &SqlitePool) -> Result<Vec<Book>> {
+pub async fn get_all_books(connection_pool: &PgPool) -> Result<Vec<Book>> {
     debug!("Getting all books at debug inside db module");
 
     Ok(
@@ -53,18 +50,14 @@ pub async fn get_all_books(connection_pool: &SqlitePool) -> Result<Vec<Book>> {
             .await?,
     )
 }
-pub async fn get_book(connection_pool: &SqlitePool, id: i32) -> Result<Book> {
+pub async fn get_book(connection_pool: &PgPool, id: i32) -> Result<Book> {
     Ok(sqlx::query_as::<_, Book>("select * from books where id=$1")
         .bind(id)
         .fetch_one(connection_pool)
         .await?)
 }
 
-pub async fn create_book(
-    connection_pool: &SqlitePool,
-    author: String,
-    title: String,
-) -> Result<i32> {
+pub async fn create_book(connection_pool: &PgPool, author: String, title: String) -> Result<i32> {
     Ok(
         sqlx::query("insert into books (title, author) VALUES ($1, $2) returning id")
             .bind(title)
@@ -74,7 +67,7 @@ pub async fn create_book(
             .get(0),
     )
 }
-pub async fn delete_book(connection_pool: &SqlitePool, id: i32) -> Result<()> {
+pub async fn delete_book(connection_pool: &PgPool, id: i32) -> Result<()> {
     sqlx::query("delete from books where id=$1")
         .bind(id)
         .execute(connection_pool)
@@ -83,7 +76,7 @@ pub async fn delete_book(connection_pool: &SqlitePool, id: i32) -> Result<()> {
     Ok(())
 }
 
-pub async fn update_book(connection_pool: &SqlitePool, book: Book) -> Result<i32> {
+pub async fn update_book(connection_pool: &PgPool, book: Book) -> Result<i32> {
     let res = sqlx::query("update books set author=$2, title=$3 where id=$1")
         .bind(book.id)
         .bind(book.author)

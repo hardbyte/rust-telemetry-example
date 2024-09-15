@@ -43,10 +43,34 @@ pub fn init_tracing() {
         .with_filter(tracing_level_filter);
 
     // Configure the stdout fmt layer
-    let fmt_layer = tracing_subscriber::fmt::layer();
+    let format = tracing_subscriber::fmt::format()
+        .with_level(true)
+        .with_target(false)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .compact();
 
+    let fmt_layer = tracing_subscriber::fmt::layer().event_format(format);
+
+    // https://github.com/grafana/docker-otel-lgtm/issues/77
+    // // Configure the Loki exporter using the builder pattern
+    // let loki_url = Url::parse("http://telemetry:3100/api/v1/push").unwrap();
+    //
+    // let (loki_layer, loki_exporter_task) = tracing_loki::builder()
+    //     .label("host", hostname::get().unwrap().into_string().unwrap()).unwrap()
+    //     .extra_field("pid", std::process::id().to_string()).unwrap()
+    //     .build_url(loki_url)
+    //     .expect("Failed to create Loki layer");
+    //
+    // // Spawn the Loki background task to send logs
+    // // Ensure that a Tokio runtime is running; otherwise, this will panic
+    // tokio::spawn(loki_exporter_task);
+    //
+
+    // Build the subscriber by combining layers
     let subscriber = tracing_subscriber::Registry::default()
         .with(fmt_layer.with_filter(tracing_subscriber::EnvFilter::from_default_env()))
+        //.with(loki_layer)
         .with(tracing_opentelemetry_layer);
 
     // Set the subscriber as the global default
