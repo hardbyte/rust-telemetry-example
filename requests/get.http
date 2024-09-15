@@ -3,6 +3,10 @@
 GET http://localhost:8000/books
 Accept: application/json
 
+### GET a book
+GET http://localhost:8000/books/1
+Accept: application/json
+
 ### Create a book
 POST http://localhost:8000/books/add
 Content-Type: application/json
@@ -11,3 +15,6 @@ Content-Type: application/json
   "title": "The Great Gatsby",
   "author": "F. Scott Fitzgerald"
 }
+
+### Delete a book
+DELETE http://localhost:8000/books/105
