@@ -8,14 +8,14 @@ use axum::{extract, http::Request, Extension, Json, Router};
 use opentelemetry::trace::TraceContextExt;
 use rdkafka::producer::FutureProducer;
 use sqlx::PgPool;
-use tracing::{debug, info, Instrument, Level};
+use tracing::{Instrument, Level};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use client::Client;
 
 #[tracing::instrument(skip(con), fields(num_books))]
 async fn get_all_books(Extension(con): Extension<PgPool>) -> Result<Json<Vec<Book>>, StatusCode> {
-    info!("Getting all books");
+    tracing::info!("Getting all books");
 
     if let Ok(books) = db::get_all_books(&con).await {
         // Now let's add an attribute to the tracing span with the number of books
@@ -62,17 +62,18 @@ async fn get_book(
     Extension(con): Extension<PgPool>,
     Path(id): Path<i32>,
 ) -> Result<Json<Book>, StatusCode> {
-    let trace_id = tracing_opentelemetry_instrumentation_sdk::find_current_trace_id();
-    debug!(
-        "trace id according to tracing_opentelemetry_instrumentation: {}",
-        trace_id.unwrap_or("not-set".into())
-    );
 
-    let span = tracing::Span::current();
-    let otel_context = span.context();
-    let trace_id2 = otel_context.span().span_context().trace_id().to_string();
+    // Metrics can be added to the tracing span directly
+    // due to the MetricsLayer
+    // https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/struct.MetricsLayer.html
+    tracing::trace!(monotonic_counter.queried_books = 1, book_id = id.to_string());
 
-    debug!("trace id from tracing: {}", trace_id2);
+    // Or more manually with the meter
+    let meter = opentelemetry::global::meter("get_book");
+    // Create a Counter Instrument.
+    let counter = meter.u64_counter("my_book_counter").init();
+    // Record 100 events.
+    counter.add(1, &[opentelemetry::KeyValue::new("book_id", id.to_string())]);
 
     if let Ok(book) = db::get_book(&con, id).await {
         Ok(Json(book))

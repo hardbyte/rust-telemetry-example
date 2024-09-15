@@ -14,6 +14,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      db:
+        condition: service_healthy
 
   backend:
     build: .
@@ -31,6 +33,8 @@ services:
       app:
         condition: service_started
       kafka:
+        condition: service_healthy
+      db:
         condition: service_healthy
 
   db:
@@ -86,5 +90,6 @@ services:
       - 4318:4318
       # Grafana UI - admin/admin
       - 3000:3000
-
-
+    volumes:
+      - ./telemetry-config/tempo-config.yaml:/otel-lgtm/tempo-config.yaml
+      - ./telemetry-config/otelcon-config.yaml:/otel-lgtm/otelcol-config.yaml
