@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "client",
-    "bookapp", "axum-otel-metrics",
+    "bookapp",
 ]
 
 [workspace.dependencies]

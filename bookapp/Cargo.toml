@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 client = { path = "../client" }
-axum-otel-metrics = {  path = "../axum-otel-metrics" }
+axum-otel-metrics = { git = "https://github.com/hardbyte/axum-otel-metrics" }
 
 
 anyhow = "1.0.86"
