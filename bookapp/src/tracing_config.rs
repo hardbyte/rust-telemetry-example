@@ -83,14 +83,14 @@ pub fn init_tracing() {
         .with_filter(tracing_level_filter);
 
     // Configure the stdout fmt layer
-    // let format = tracing_subscriber::fmt::format()
-    //     .with_level(true)
-    //     .with_target(false)
-    //     .with_thread_ids(false)
-    //     .with_thread_names(false)
-    //     .compact();
-    //
-    // let fmt_layer = tracing_subscriber::fmt::layer().event_format(format);
+    let format = tracing_subscriber::fmt::format()
+        .with_level(true)
+        .with_target(false)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .compact();
+
+    let fmt_layer = tracing_subscriber::fmt::layer().event_format(format);
 
 
     // Logs to OTEL
@@ -115,10 +115,10 @@ pub fn init_tracing() {
 
     // Build the subscriber by combining layers
     let subscriber = tracing_subscriber::Registry::default()
-        //.with(fmt_layer.with_filter(tracing_subscriber::EnvFilter::from_default_env()))
         .with(otel_log_layer)
         .with(opentelemetry_metrics_layer)
-        .with(tracing_opentelemetry_layer);
+        .with(tracing_opentelemetry_layer)
+        .with(fmt_layer.with_filter(tracing_subscriber::EnvFilter::from_default_env()));
 
     // Set the subscriber as the global default
     tracing::subscriber::set_global_default(subscriber).expect("Failed to set subscriber");
