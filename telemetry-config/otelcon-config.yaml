@@ -1,4 +1,3 @@
-# https://github.com/grafana/docker-otel-lgtm/blob/main/docker/otelcol-config.yaml
 receivers:
   otlp:
     protocols:
@@ -6,6 +5,7 @@ receivers:
         endpoint: 0.0.0.0:4317
       http:
         endpoint: 0.0.0.0:4318
+
   prometheus/collector:
     config:
       scrape_configs:
@@ -13,8 +13,45 @@ receivers:
           static_configs:
             - targets: ['localhost:8888']
 
+  kafkametrics:
+    brokers: kafka:9092
+    protocol_version: 2.0.0
+    scrapers:
+      - brokers
+      - topics
+      - consumers
+    collection_interval: 10s
+
+  postgresql:
+    endpoint: db:5432
+    tls:
+      insecure: true
+    username: postgres
+    password: password
+    collection_interval: 10s
+    connection_pool:
+      max_idle_time: 10m
+      max_lifetime: 0
+      max_idle: 2
+      max_open: 2
+
+  sqlquery/metrics:
+    collection_interval: 10s
+    datasource: "postgresql://postgres:password@db/bookapp?sslmode=disable"
+    driver: postgres
+    initial_delay: 5s
+    queries:
+      - sql: |-
+          select count(*) as count from books
+        metrics:
+          - metric_name: bt.sql_books_count
+            value_column: "count"
+
 processors:
+  resourcedetection:
+    detectors: [ env, system ]
   batch:
+    timeout: 10s
 
 exporters:
   otlphttp/metrics:
@@ -42,14 +79,16 @@ service:
       receivers: [otlp]
       processors: [batch]
       exporters: [otlphttp/traces]
-      #exporters: [otlphttp/traces,logging/traces]
     metrics:
-      receivers: [otlp,prometheus/collector]
+      receivers:
+        - otlp
+        - prometheus/collector
+        - kafkametrics
+        - postgresql
+        - sqlquery/metrics
       processors: [batch]
       exporters: [otlphttp/metrics]
-      #exporters: [otlphttp/metrics,logging/metrics]
     logs:
       receivers: [otlp]
       processors: [batch]
       exporters: [otlphttp/logs]
-      #exporters: [otlphttp/logs,logging/logs]
