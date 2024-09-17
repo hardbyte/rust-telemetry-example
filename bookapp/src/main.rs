@@ -16,6 +16,7 @@ use rdkafka::config::ClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use tower::ServiceBuilder;
 use tower_http::trace::{DefaultMakeSpan, TraceLayer};
+use tokio::signal::unix::{signal, SignalKind};
 
 use crate::db::init_db;
 use sqlx::PgPool;
@@ -89,12 +90,26 @@ async fn main() -> Result<()> {
         // Start the server
         let listener = tokio::net::TcpListener::bind("0.0.0.0:8000").await?;
 
+
         info!("Starting webserver");
-        axum::serve(listener, app).await?;
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+
+                let mut signal_terminate = signal(SignalKind::terminate()).unwrap();
+                let mut signal_interrupt = signal(SignalKind::interrupt()).unwrap();
+
+                tokio::select! {
+                    _ = signal_terminate.recv() => tracing::debug!("Received SIGTERM."),
+                    _ = signal_interrupt.recv() => tracing::debug!("Received SIGINT."),
+                }
+            })
+            .await?;
     }
 
+    info!("Shutting down");
     // Shutdown OpenTelemetry
     global::shutdown_tracer_provider();
+    info!("Shut down");
 
     Ok(())
 }
