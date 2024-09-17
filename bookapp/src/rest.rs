@@ -71,7 +71,11 @@ async fn get_book(
     // Or more manually with the meter
     let meter = opentelemetry::global::meter("get_book");
     // Create a Counter Instrument.
-    let counter = meter.u64_counter("my_book_counter").init();
+    let counter = meter.u64_counter("my_book_counter")
+        .with_unit("one")
+        .with_description("Retrieval of a book")
+        .init();
+
     // Record 100 events.
     counter.add(1, &[opentelemetry::KeyValue::new("book_id", id.to_string())]);
 
