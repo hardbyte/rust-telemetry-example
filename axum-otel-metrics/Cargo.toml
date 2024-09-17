@@ -1,0 +1,14 @@
+[package]
+name = "axum-otel-metrics"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+tower.workspace = true
+axum.workspace = true
+opentelemetry.workspace = true
+
+futures-util = "0.3.30"
+http-body = "1.0.1"
+pin-project-lite = "0.2.14"

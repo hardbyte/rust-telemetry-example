@@ -68,15 +68,14 @@ async fn get_book(
     // https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/struct.MetricsLayer.html
     tracing::trace!(monotonic_counter.queried_books = 1, book_id = id.to_string());
 
-    // Or more manually with the meter
-    let meter = opentelemetry::global::meter("get_book");
+    let meter = opentelemetry::global::meter("bookapp");
+
     // Create a Counter Instrument.
     let counter = meter.u64_counter("my_book_counter")
-        .with_unit("one")
         .with_description("Retrieval of a book")
         .init();
 
-    // Record 100 events.
+    // Add 1 for this book_id to the counter
     counter.add(1, &[opentelemetry::KeyValue::new("book_id", id.to_string())]);
 
     if let Ok(book) = db::get_book(&con, id).await {

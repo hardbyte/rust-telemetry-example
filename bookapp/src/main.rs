@@ -42,6 +42,10 @@ fn router(connection_pool: PgPool, producer: FutureProducer) -> Router {
         // start OpenTelemetry trace on incoming request
         // as long as not filtered out!
         .layer(OtelAxumLayer::default())
+        .layer(axum_otel_metrics::HttpMetricsLayerBuilder::new()
+            .with_labels(vec![("env".to_string(), "testing".to_string())].into_iter().collect())
+            .build()
+        )
 
     // Other non-traced routes can go after this:
     //.route("/health", get(health)) // request processed without span / trace
@@ -106,8 +110,8 @@ async fn main() -> Result<()> {
             .await?;
     }
 
-    info!("Shutting down");
-    // Shutdown OpenTelemetry
+    info!("Shutting down OpenTelemetry");
+
     global::shutdown_tracer_provider();
     info!("Shut down");
 

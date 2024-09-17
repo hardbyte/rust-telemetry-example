@@ -7,9 +7,11 @@ edition = "2021"
 
 [dependencies]
 client = { path = "../client" }
+axum-otel-metrics = {  path = "../axum-otel-metrics" }
+
 
 anyhow = "1.0.86"
-axum = { version = "0.7.5", features=["json"] }
+axum = { workspace = true, features=["json"] }
 dotenv = "0.15.0"
 opentelemetry = { workspace = true}
 opentelemetry-otlp = { version="0.17.0" , features = [
@@ -20,7 +22,7 @@ opentelemetry_sdk = { version="0.24.1", features = ["trace", "opentelemetry-http
 serde = "1.0.196"
 sqlx = { version = "0.8.0", features = ["runtime-tokio", "postgres"] }
 tokio = { version = "1.38.1", features = ["full"] }
-tower = "0.5.1"
+tower = {workspace = true}
 tower-http = { version = "0.5.2", features = ["trace"] }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true , features=["async-trait"]}

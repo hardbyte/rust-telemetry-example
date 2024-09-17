@@ -2,11 +2,12 @@
 resolver = "2"
 members = [
     "client",
-    "bookapp",
+    "bookapp", "axum-otel-metrics",
 ]
 
 [workspace.dependencies]
-
+axum = { version = "0.7.5" }
+tower = "0.5.1"
 reqwest = "0.12.7"
 opentelemetry = "0.24.0"
 tracing = { version = "0.1.40" }

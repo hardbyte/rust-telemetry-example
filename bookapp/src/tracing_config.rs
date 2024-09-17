@@ -1,16 +1,23 @@
 use opentelemetry::trace::TracerProvider;
-use opentelemetry::logs::LoggerProvider;
+use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Layer;
 
 fn init_meter_provider() -> opentelemetry_sdk::metrics::SdkMeterProvider {
-    let exporter = opentelemetry_otlp::new_exporter().tonic();
+    let exporter = opentelemetry_otlp::new_exporter()
+        .tonic()
+        .with_timeout(std::time::Duration::from_secs(10));
+
     let provider = opentelemetry_otlp::new_pipeline()
         .metrics(opentelemetry_sdk::runtime::Tokio)
         .with_period(std::time::Duration::from_secs(5))
         .with_timeout(std::time::Duration::from_secs(10))
         .with_exporter(exporter)
+        .with_resource(opentelemetry_sdk::Resource::default())
+        .with_resource(opentelemetry_sdk::Resource::new(
+            vec![opentelemetry::KeyValue::new("service.name", "bookapp")]
+        ))
         .build()
         .unwrap();
     let cloned_provider = provider.clone();
