@@ -13,6 +13,25 @@ receivers:
           static_configs:
             - targets: ['localhost:8888']
 
+#  docker_stats:
+#    collection_interval: 2s
+#    timeout: 20s
+##    container_labels_to_metric_labels:
+##      my.container.label: my-metric-label
+##      my.other.container.label: my-other-metric-label
+#    env_vars_to_metric_labels:
+#      OTEL_SERVICE_NAME: my-custom-app-name
+#
+#    excluded_images:
+#      - telemetry
+#
+#    metrics:
+#      container.cpu.usage.percpu:
+#        enabled: true
+#      container.cpu.utilization:
+#        enabled: true
+
+
   kafkametrics:
     brokers: kafka:9092
     protocol_version: 2.0.0
@@ -50,6 +69,45 @@ receivers:
 processors:
   resourcedetection:
     detectors: [ env, system ]
+
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 10
+    spike_limit_percentage: 5
+
+  #filter:
+
+  resource/logs:
+    attributes:
+      - key: "injected_resource_attribute"
+        action: "insert"
+        value: "otel-collector"
+
+  attributes/logs:
+    # https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/processor/attributesprocessor/README.md
+    actions:
+      - key: "name"
+        pattern: ^(?:event\s+)?(?P<file_path>[^\s:]+):(?P<line_number>\d+)
+        action: extract
+      - key: line_number
+        action: convert
+        converted_type: int
+      - key: "name-copied"
+        action: "upsert"
+        from_attribute: name
+      - key: "name"
+        action: "delete"
+
+
+  transform/logs:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - set(resource.attributes["container_id"], resource.attributes["host.name"])
+          - delete_key(resource.attributes, "host.name")
+          - set(attributes["level"], severity_text)
+
   batch:
     timeout: 10s
 
@@ -66,29 +124,31 @@ exporters:
     endpoint: http://localhost:3100/otlp
     tls:
       insecure: true
-  logging/metrics:
+  debug/metrics:
     verbosity: detailed
-  logging/traces:
+  debug/traces:
     verbosity: detailed
-  logging/logs:
+  debug/logs:
     verbosity: detailed
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [batch]
+      processors: [memory_limiter,resourcedetection,batch]
       exporters: [otlphttp/traces]
     metrics:
       receivers:
         - otlp
         - prometheus/collector
+#        - docker_stats
         - kafkametrics
         - postgresql
         - sqlquery/metrics
-      processors: [batch]
+      processors: [memory_limiter,batch]
       exporters: [otlphttp/metrics]
     logs:
       receivers: [otlp]
-      processors: [batch]
+      processors: [memory_limiter,resourcedetection,resource/logs,transform/logs,attributes/logs,batch]
+#      exporters: [otlphttp/logs,debug/logs]
       exporters: [otlphttp/logs]

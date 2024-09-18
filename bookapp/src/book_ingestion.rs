@@ -185,7 +185,11 @@ pub async fn run_consumer() -> Result<()> {
 
                 // Extract the linked span context from the otel context
                 let linked_span_context = parent_cx.span().span_context().clone();
-                tracing::info!("Linked span context: {:?}", linked_span_context);
+                tracing::debug!(
+                    trace_id = %linked_span_context.trace_id(),
+                    span_id = %linked_span_context.span_id(),
+                    "Extracting context from linked span"
+                );
 
                 // Create a new root span and link it to the producer's span
                 // Using tracing-opentelemetry to create a span

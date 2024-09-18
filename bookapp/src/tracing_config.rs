@@ -97,7 +97,8 @@ pub fn init_tracing() {
         .with_thread_names(false)
         .compact();
 
-    let fmt_layer = tracing_subscriber::fmt::layer().event_format(format);
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .event_format(format);
 
 
     // Logs to OTEL
@@ -112,7 +113,7 @@ pub fn init_tracing() {
     // thus preventing infinite event generation.
     // Note: This will also drop events from these crates used outside the OTLP Exporter.
     // For more details, see: https://github.com/open-telemetry/opentelemetry-rust/issues/761
-    let otel_log_filter = tracing_subscriber::EnvFilter::new("info")
+    let otel_log_filter = tracing_subscriber::EnvFilter::new("info,backend=debug,bookapp=debug,sqlx=info")
         .add_directive("hyper=error".parse().unwrap())
         .add_directive("tonic=error".parse().unwrap())
         .add_directive("reqwest=error".parse().unwrap());
