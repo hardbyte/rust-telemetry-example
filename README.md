@@ -11,7 +11,7 @@ a generated progenitor client and kafka messages.
 
 In the case of kafka we create a linked span rather than continuing the parent span. 
 
-The `tracing-opentelemetry` crate is subscribes to `tracing` and exports the traces 
+The `tracing-opentelemetry` crate exposes a `tracing` subscriber that exports the traces 
 to the **OpenTelemetry Collector** using `opentelemetry-otlp`.
 
 **Span metrics** are calculated from the trace data using the otel collector along with exemplars.

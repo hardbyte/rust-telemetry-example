@@ -80,6 +80,10 @@ services:
 
   telemetry:
     image: grafana/otel-lgtm:0.7.4
+    depends_on:
+      db:
+        condition: service_healthy
+
     environment:
       ENABLE_LOGS_OTELCOL: 'true'
       GF_AUTH_ANONYMOUS_ENABLED: 'true'
@@ -95,6 +99,5 @@ services:
       - ./telemetry-config/otelcon-config.yaml:/otel-lgtm/otelcol-config.yaml
       - ./telemetry-config/grafana-dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/grafana-dashboards.yaml
       - ./telemetry-config/dashboards:/otel-lgtm/dashboards
-#      - /var/run/docker.sock:/var/run/docker.sock
-
-
+      # Required for docker stats
+      - /var/run/docker.sock:/var/run/docker.sock

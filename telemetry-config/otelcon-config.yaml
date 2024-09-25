@@ -3,8 +3,8 @@ receivers:
     protocols:
       grpc:
         endpoint: 0.0.0.0:4317
-      http:
-        endpoint: 0.0.0.0:4318
+#      http:
+#        endpoint: 0.0.0.0:4318
 
   prometheus/collector:
     config:
@@ -13,23 +13,16 @@ receivers:
           static_configs:
             - targets: ['localhost:8888']
 
-#  docker_stats:
-#    collection_interval: 2s
-#    timeout: 20s
-##    container_labels_to_metric_labels:
-##      my.container.label: my-metric-label
-##      my.other.container.label: my-other-metric-label
-#    env_vars_to_metric_labels:
-#      OTEL_SERVICE_NAME: my-custom-app-name
-#
-#    excluded_images:
-#      - telemetry
-#
-#    metrics:
-#      container.cpu.usage.percpu:
-#        enabled: true
-#      container.cpu.utilization:
-#        enabled: true
+  docker_stats:
+    collection_interval: 10s
+    timeout: 20s
+    excluded_images:
+      - telemetry
+    metrics:
+      container.cpu.usage.percpu:
+        enabled: true
+      container.cpu.utilization:
+        enabled: true
 
 
   kafkametrics:
@@ -108,6 +101,25 @@ processors:
           - delete_key(resource.attributes, "host.name")
           - set(attributes["level"], severity_text)
 
+  # To play nicer with prometheus we will add some extra labels to the metrics from the resource
+  # attributes
+  # https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/receiver/dockerstatsreceiver/documentation.md#resource-attributes
+  transform/metrics/docker_stats:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(attributes["hostname"], resource.attributes["container.hostname"])
+          - set(attributes["container_name"], resource.attributes["container.name"])
+          - set(attributes["image_name"], resource.attributes["container.image.name"])
+
+  transform/metrics/kafka:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(attributes["cluster_alias"], resource.attributes["kafka.cluster.alias"])
+
   batch:
     timeout: 10s
 
@@ -137,16 +149,28 @@ service:
       receivers: [otlp]
       processors: [memory_limiter,resourcedetection,batch]
       exporters: [otlphttp/traces]
+
     metrics:
       receivers:
         - otlp
         - prometheus/collector
-#        - docker_stats
-        - kafkametrics
         - postgresql
         - sqlquery/metrics
       processors: [memory_limiter,batch]
       exporters: [otlphttp/metrics]
+
+    metrics/kafka:
+      receivers: [kafkametrics]
+      processors: [memory_limiter,transform/metrics/kafka,batch]
+      exporters: [otlphttp/metrics]
+      # Enable debugging
+      #exporters: [otlphttp/metrics, debug/metrics]
+
+    metrics/docker:
+      receivers: [docker_stats]
+      processors: [memory_limiter,transform/metrics/docker_stats,batch]
+      exporters: [otlphttp/metrics]
+
     logs:
       receivers: [otlp]
       processors: [memory_limiter,resourcedetection,resource/logs,transform/logs,attributes/logs,batch]
