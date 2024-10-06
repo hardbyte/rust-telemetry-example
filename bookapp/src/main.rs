@@ -4,6 +4,7 @@ mod reqwest_traced_client;
 mod rest;
 mod topic_management;
 mod tracing_config;
+mod error_injection_middleware;
 
 use opentelemetry::global;
 
@@ -26,6 +27,7 @@ use tracing::info;
 fn router(connection_pool: PgPool, producer: FutureProducer) -> Router {
     Router::new()
         .nest_service("/books", rest::book_service())
+        .nest_service("/error-injection", error_injection_middleware::error_injection_service())
         .layer(Extension(connection_pool))
         .layer(Extension(producer))
         // This layer creates a new Tracing span called "request" for each request,
@@ -46,6 +48,7 @@ fn router(connection_pool: PgPool, producer: FutureProducer) -> Router {
             .with_labels(vec![("env".to_string(), "testing".to_string())].into_iter().collect())
             .build()
         )
+        .layer(axum::middleware::from_fn(error_injection_middleware::error_injection_middleware))
 
     // Other non-traced routes can go after this:
     //.route("/health", get(health)) // request processed without span / trace
