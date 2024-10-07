@@ -1,0 +1,33 @@
+
+### GET error injection configs
+GET http://localhost:8000/error-injection
+Accept: application/json
+
+### Create an error injection on getting an individual book
+POST http://localhost:8000/error-injection
+Content-Type: application/json
+
+{
+  "endpoint_pattern": "/books/{id}",
+  "http_method": "GET",
+  "error_rate": 0.5,
+  "error_code": 500,
+  "error_message": "Injected Internal Server Error"
+}
+
+
+### Update the error injection rate
+PUT http://localhost:8000/error-injection/1
+Content-Type: application/json
+
+{
+  "endpoint_pattern": "/books/{id}",
+  "http_method": "GET",
+  "error_rate": 0.5,
+  "error_code": 421,
+  "error_message": "Injected Internal Server Error"
+}
+
+### Remove the error injection
+DELETE http://localhost:8000/error-injection/1
+
