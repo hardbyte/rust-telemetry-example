@@ -198,6 +198,7 @@ pub async fn get_all_configs_handler(
 /// # Request Body
 ///
 /// JSON representation of `ErrorInjectionConfigInput`.
+#[tracing::instrument(skip_all)]
 pub async fn create_config(
     Extension(store): Extension<Arc<dyn ErrorInjectionConfigStore>>,
     Json(config): Json<ErrorInjectionConfigInput>,
@@ -220,6 +221,7 @@ pub async fn create_config(
 /// # Request Body
 ///
 /// JSON representation of `ErrorInjectionConfigInput`.
+#[tracing::instrument(skip_all, fields(id))]
 pub async fn update_config(
     Extension(store): Extension<Arc<dyn ErrorInjectionConfigStore>>,
     Path(id): Path<i32>,
@@ -239,6 +241,7 @@ pub async fn update_config(
 /// # Path Parameters
 ///
 /// * `id` - The ID of the configuration to delete.
+#[tracing::instrument(skip_all, fields(id))]
 pub async fn delete_config(
     Extension(store): Extension<Arc<dyn ErrorInjectionConfigStore>>,
     Path(id): Path<i32>,
@@ -297,7 +300,6 @@ pub async fn error_injection_middleware(
     req: Request,
     next: Next,
 ) -> impl IntoResponse {
-    tracing::debug!("running middleware");
     let path = req.uri().path().to_string();
     let method = req.method().as_str().to_string();
 
@@ -310,7 +312,9 @@ pub async fn error_injection_middleware(
         let random_value: f64 = rng.gen();
 
         if random_value < config.error_rate {
-            tracing::warn!(
+            tracing::debug!(
+                path = path,
+                method = method,
                 injected_status_code = config.error_code,
                 "Injecting an error"
             );
@@ -321,6 +325,10 @@ pub async fn error_injection_middleware(
                 .unwrap_or_else(|| status_code.canonical_reason().unwrap_or("Error").to_string());
             return (status_code, body).into_response();
         }
+    } else {
+        tracing::debug!(path = path, method = method,
+            "No error injection configured for this endpoint"
+        );
     }
 
     // Run the next middleware or handler
@@ -339,7 +347,9 @@ pub async fn error_injection_middleware(
 /// # Returns
 ///
 /// An `Option<ErrorInjectionConfig>` that matches the request.
-#[tracing::instrument(skip(store))]
+#[tracing::instrument(skip(store), fields(
+    num_configs = tracing::field::Empty
+))]
 async fn get_matching_error_injection_config(
     store: Arc<dyn ErrorInjectionConfigStore>,
     path: &str,
@@ -347,21 +357,19 @@ async fn get_matching_error_injection_config(
 ) -> Option<ErrorInjectionConfig> {
     // Fetch all configurations for the given HTTP method
     let configs = store.get_configs_for_method(method).await.ok()?;
-
-    tracing::debug!(num_configs = configs.len(), "Got error injection configs");
+    tracing::Span::current().record("num_configs", configs.len());
 
     // Use matchit crate for path matching
     let mut router = MatchRouter::new();
 
     for config in configs {
         // Add the endpoint_pattern to the router
-        tracing::debug!(pattern = config.endpoint_pattern, "Adding config to matchit router");
         let _ = router.insert(&config.endpoint_pattern, config.clone());
     }
 
     if let Ok(matched) = router.at(path) {
         let config = matched.value.clone();
-        tracing::debug!(config = ?config, "There was a match");
+        tracing::debug!(config = ?config, "There was a matching error injection config");
         Some(config)
     } else {
         None
