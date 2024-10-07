@@ -23,7 +23,7 @@ pub struct Book {
 
 pub async fn init_db() -> Result<PgPool> {
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    info!("Connecting to database at {}", db_url);
+    info!(db_url = db_url, "Connecting to database");
 
     let con_pool = PgPoolOptions::new()
         .max_connections(5)
@@ -86,6 +86,8 @@ pub async fn update_book(connection_pool: &PgPool, book: Book) -> Result<i32> {
 
     Ok(res.rows_affected().try_into().unwrap())
 }
+
+
 
 #[cfg(test)]
 mod test {

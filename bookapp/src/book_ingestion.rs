@@ -127,12 +127,11 @@ pub async fn send_book_ingestion_message(
         .payload(&payload)
         .headers(injector.into_owned_headers());
 
-    tracing::debug!("Sending message to process later");
+    tracing::debug!(record_key = key, "Sending message to process later");
     producer
         .send(record, Timeout::Never)
         .await
         .map_err(|(e, _)| {
-            error!("Failed to send message: {:?}", e);
             anyhow::anyhow!("Failed to send message: {:?}", e)
         })?;
 
@@ -170,8 +169,11 @@ pub async fn run_consumer() -> Result<()> {
                     None => "",
                     Some(Ok(s)) => s,
                     Some(Err(e)) => {
-                        error!("Error while deserializing payload: {:?}", e);
-                        ""
+                        error!(
+                            error = format!("{e:#}"),
+                            "Error while deserializing payload"
+                        );
+                        continue
                     }
                 };
 
