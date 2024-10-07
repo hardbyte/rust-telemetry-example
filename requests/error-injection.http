@@ -23,8 +23,8 @@ Content-Type: application/json
 {
   "endpoint_pattern": "/books/{id}",
   "http_method": "GET",
-  "error_rate": 0.5,
-  "error_code": 421,
+  "error_rate": 0.025,
+  "error_code": 500,
   "error_message": "Injected Internal Server Error"
 }
 

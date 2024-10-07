@@ -8,3 +8,10 @@ providers:
     options:
       path: /otel-lgtm/dashboards
       allowUiUpdates: true
+  - name: 'Alerts'
+    type: file
+    foldersFromFilesStructure: true
+    disableDeletion: true
+    options:
+      path: /otel-lgtm/alerts
+      allowUiUpdates: true

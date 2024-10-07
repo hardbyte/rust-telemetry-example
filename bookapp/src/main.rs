@@ -34,15 +34,16 @@ fn router(connection_pool: PgPool, producer: FutureProducer) -> Router {
 
     Router::new()
         .nest_service("/books", rest::book_service())
-        .nest_service("/error-injection", error_injection_middleware::error_injection_service(error_injection_store.clone()))
-        .layer(Extension(connection_pool))
         .layer(Extension(producer))
         // Our custom error injection layer can inject errors
         // This layer itself can be traced - so needs to be added before our OtelAxumLayer
         .layer(axum::middleware::from_fn_with_state(
-            error_injection_store,
+            error_injection_store.clone(),
             error_injection_middleware::error_injection_middleware)
         )
+        .nest_service("/error-injection", error_injection_middleware::error_injection_service(error_injection_store.clone()))
+        .layer(Extension(connection_pool))
+
         // This layer creates a new Tracing span called "request" for each request,
         // it logs headers etc but on its own doesn't do the OTEL trace context propagation.
         // .layer(ServiceBuilder::new().layer(
@@ -52,6 +53,7 @@ fn router(connection_pool: PgPool, producer: FutureProducer) -> Router {
         //             .level(tracing::Level::INFO))
         //
         // ))
+
         // include trace context as header into the response
         .layer(OtelInResponseLayer::default())
         // start OpenTelemetry trace on incoming request

@@ -99,5 +99,6 @@ services:
       - ./telemetry-config/otelcon-config.yaml:/otel-lgtm/otelcol-config.yaml
       - ./telemetry-config/grafana-dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/grafana-dashboards.yaml
       - ./telemetry-config/dashboards:/otel-lgtm/dashboards
+      - ./telemetry-config/alerts:/otel-lgtm/alerts
       # Required for docker stats
       - /var/run/docker.sock:/var/run/docker.sock
