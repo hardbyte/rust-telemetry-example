@@ -25,11 +25,24 @@ use tokio::task;
 use tracing::info;
 
 fn router(connection_pool: PgPool, producer: FutureProducer) -> Router {
+
+    // Create the ErrorInjectionConfigStore
+    let error_injection_store = std::sync::Arc::new(
+        error_injection_middleware::PostgresErrorInjectionConfigStore::new(connection_pool.clone())
+    ) as std::sync::Arc<dyn error_injection_middleware::ErrorInjectionConfigStore>;
+
+
     Router::new()
         .nest_service("/books", rest::book_service())
-        .nest_service("/error-injection", error_injection_middleware::error_injection_service())
+        .nest_service("/error-injection", error_injection_middleware::error_injection_service(error_injection_store.clone()))
         .layer(Extension(connection_pool))
         .layer(Extension(producer))
+        // Our custom error injection layer can inject errors
+        // This layer itself can be traced - so needs to be added before our OtelAxumLayer
+        .layer(axum::middleware::from_fn_with_state(
+            error_injection_store,
+            error_injection_middleware::error_injection_middleware)
+        )
         // This layer creates a new Tracing span called "request" for each request,
         // it logs headers etc but on its own doesn't do the OTEL trace context propagation.
         // .layer(ServiceBuilder::new().layer(
@@ -48,7 +61,7 @@ fn router(connection_pool: PgPool, producer: FutureProducer) -> Router {
             .with_labels(vec![("env".to_string(), "testing".to_string())].into_iter().collect())
             .build()
         )
-        .layer(axum::middleware::from_fn(error_injection_middleware::error_injection_middleware))
+
 
     // Other non-traced routes can go after this:
     //.route("/health", get(health)) // request processed without span / trace
