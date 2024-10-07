@@ -143,7 +143,11 @@ async fn queue_background_ingestion_task(producer: &FutureProducer, new_id: i32)
         crate::book_ingestion::send_book_ingestion_message(&producer, &book_message, &otel_context)
             .await
     {
-        tracing::error!("Failed to send Kafka message: {:?}", e);
+        tracing::error!(
+            error = format!("{e:#}"),
+            book_id = new_id,
+            "Failed to send Kafka message"
+        );
         // Set span status to error
         tracing::Span::current().set_attribute("otel.status_code", "ERROR");
     }
