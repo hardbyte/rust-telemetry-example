@@ -83,7 +83,7 @@ fn background_process_new_book(book_id: i32) {
         "Starting processing new book in the background"
     );
     // Sleep for a short time to simulate processing
-    std::thread::sleep(std::time::Duration::from_secs(5));
+    std::thread::sleep(std::time::Duration::from_millis(5));
     info!(
         book_id = book_id,
         "Completed processing new book in the background"
