@@ -143,12 +143,20 @@ exporters:
   debug/logs:
     verbosity: detailed
 
+#  otlphttp/axiom:
+#    compression: gzip
+#    endpoint: https://api.axiom.co
+#    headers:
+#      authorization: Bearer ${env:AXIOM_API_KEY}
+#      x-axiom-dataset: rust-telemetry-example-bookapp
+
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [memory_limiter,resourcedetection,batch]
       exporters: [otlphttp/traces]
+      #exporters: [otlphttp/traces, otlphttp/axiom]
 
     metrics:
       receivers:
