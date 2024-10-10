@@ -44,10 +44,10 @@ pub async fn ensure_topic_exists(
 
     for result in res {
         match result {
-            Ok(topic) => tracing::info!("Created topic: {}", topic),
+            Ok(topic) => tracing::info!(topic = topic, "Created Kafka topic"),
             Err((topic, err)) => {
                 if err == TopicAlreadyExists {
-                    tracing::info!("Topic {} already exists", topic);
+                    tracing::info!(topic = topic, "Kafka topic already exists");
                 } else {
                     return Err(anyhow::anyhow!(
                         "Failed to create topic {}: {:?}",

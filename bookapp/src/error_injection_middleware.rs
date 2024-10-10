@@ -322,11 +322,11 @@ pub async fn error_injection_middleware(
                 .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
             let body = config
                 .error_message
-                .unwrap_or_else(|| status_code.canonical_reason().unwrap_or("Error").to_string());
+                .unwrap_or_else(|| status_code.canonical_reason().unwrap_or("Injected Error").to_string());
             return (status_code, body).into_response();
         }
     } else {
-        tracing::debug!(path = path, method = method,
+        tracing::trace!(path = path, method = method,
             "No error injection configured for this endpoint"
         );
     }
@@ -369,7 +369,7 @@ async fn get_matching_error_injection_config(
 
     if let Ok(matched) = router.at(path) {
         let config = matched.value.clone();
-        tracing::debug!(config = ?config, "There was a matching error injection config");
+        tracing::trace!(config = ?config, "There was a matching error injection config");
         Some(config)
     } else {
         None
