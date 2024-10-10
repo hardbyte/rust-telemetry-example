@@ -54,3 +54,25 @@ Accept: application/json
 Open Grafana at localhost:3000 and login with `admin:admin`
 
 ![img.png](.github/img.png)
+
+
+## Load Testing
+
+```shell
+uvx --with locust locust -f requests/locustfile.py
+```
+
+
+![img.png](./.github/locust-screenshot.png)
+
+## Migrations
+
+Migrations are run automatically by the bookapp container, or can manually be run using `sqlx-cli`:
+
+```shell
+docker compose up -d db
+cargo install sqlx-cli
+sqlx migrate run
+sqlx migrate add <new migration>
+```
+

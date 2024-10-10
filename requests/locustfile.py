@@ -10,7 +10,7 @@ class BookTasks(TaskSet):
         self.created_book_ids = []
 
 
-    @task(10)
+    @task(100)
     def get_book(self):
         # Randomly select a book ID
         book_id = random.randint(1, 90)
