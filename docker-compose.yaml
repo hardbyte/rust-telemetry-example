@@ -16,8 +16,6 @@ services:
         condition: service_healthy
       db:
         condition: service_healthy
-      telemetry:
-        condition: service_healthy
 
   backend:
     build: .
@@ -38,8 +36,7 @@ services:
         condition: service_healthy
       db:
         condition: service_healthy
-      telemetry:
-        condition: service_healthy
+
 
   db:
     image: postgres:16
@@ -95,6 +92,7 @@ services:
       ENABLE_LOGS_OTELCOL: 'true'
       GF_AUTH_ANONYMOUS_ORG_NAME: 'Main Org.'
       GF_AUTH_DISABLE_LOGIN_FORM: 'true'
+      ENABLE_LOGS_PROMETHEUS: 'true'
       #AXIOM_API_KEY: ''
     ports:
       - "4317:4317"

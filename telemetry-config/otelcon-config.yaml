@@ -70,6 +70,8 @@ processors:
 
   #filter:
 
+  deltatocumulative:
+
   resource/logs:
     attributes:
       - key: "injected_resource_attribute"
@@ -150,13 +152,40 @@ exporters:
 #      authorization: Bearer ${env:AXIOM_API_KEY}
 #      x-axiom-dataset: rust-telemetry-example-bookapp
 
+connectors:
+  # https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/connector/exceptionsconnector
+  exceptions:
+
+
+  # https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/connector/countconnector/README.md
+  count:
+    logs:
+      bt_service_log_count:
+        description: The number of logs from each file.
+        attributes:
+          - key: file_path
+            default_value: unspecified_file_path
+
+    spanevents:
+      bt.span.event.count:
+        description: The number of span events originating from the bookapp/db module.
+        conditions:
+          - 'attributes["code.namespace"] == "bookapp::db"'
+
+
 service:
+
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [memory_limiter,resourcedetection,batch]
-      exporters: [otlphttp/traces]
+      processors: [memory_limiter, resourcedetection, batch]
+      exporters: [exceptions, otlphttp/traces]
       #exporters: [otlphttp/traces, otlphttp/axiom]
+
+    traces/count:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [count]
 
     metrics:
       receivers:
@@ -164,7 +193,14 @@ service:
         - prometheus/collector
         - postgresql
         - sqlquery/metrics
-      processors: [memory_limiter,batch]
+#        - count
+        - exceptions
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/metrics]
+
+    metrics/counts:
+      receivers: [count]
+      processors: [deltatocumulative, batch]
       exporters: [otlphttp/metrics]
 
     metrics/kafka:
@@ -182,5 +218,4 @@ service:
     logs:
       receivers: [otlp]
       processors: [memory_limiter,resourcedetection,resource/logs,transform/logs,attributes/logs,batch]
-#      exporters: [otlphttp/logs,debug/logs]
-      exporters: [otlphttp/logs]
+      exporters: [otlphttp/logs, count]

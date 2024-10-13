@@ -59,7 +59,12 @@ Open Grafana at localhost:3000 and login with `admin:admin`
 ## Load Testing
 
 ```shell
-uvx --with locust locust -f requests/locustfile.py
+uvx \
+  --with 'opentelemetry-sdk' \
+  --with "opentelemetry-exporter-otlp-proto-grpc >=1.24.0" \
+  --with "opentelemetry-instrumentation-requests==0.46b0" \
+  --with "opentelemetry-instrumentation-urllib3==0.46b0" \
+  locust -f requests/locustfile.py
 ```
 
 

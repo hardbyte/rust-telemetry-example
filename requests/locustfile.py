@@ -1,8 +1,63 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "locust",
+#     "opentelemetry-sdk >1.24",
+#     "opentelemetry-exporter-otlp-proto-grpc >=1.24.0",
+#    opentelemetry-instrumentation-requests==0.46b0
+#    opentelemetry-instrumentation-system-metrics==0.46b0
+#    "opentelemetry-instrumentation-urllib3==0.46b0",
+# ]
+# ///
+from locust import HttpUser, TaskSet, task, between
+
+try:
+    from opentelemetry import trace
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+    from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+    from opentelemetry.sdk.trace import TracerProvider, ReadableSpan
+    from opentelemetry.instrumentation.requests import RequestsInstrumentor
+    # from opentelemetry.instrumentation.system_metrics import SystemMetricsInstrumentor
+    from opentelemetry.instrumentation.urllib3 import URLLib3Instrumentor
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+except ImportError:
+    print("opentelemetry is not installed. Tracing will be disabled.")
+    trace = None
+
 import json
 import string
-
-from locust import HttpUser, TaskSet, task, between
 import random
+
+def init_telemetry(
+        service_name: str = "load-tester-client"
+):
+    resource = Resource.create(
+        {SERVICE_NAME: service_name}
+    )
+    provider = TracerProvider(resource=resource)
+
+    span_exporter = OTLPSpanExporter()
+    span_processor = BatchSpanProcessor(span_exporter)
+    # add to the tracer
+    provider.add_span_processor(span_processor)
+
+    trace.set_tracer_provider(provider)
+
+    # Configure any instruments
+    RequestsInstrumentor().instrument()
+    # SystemMetricsInstrumentor().instrument()
+    URLLib3Instrumentor().instrument()
+
+    tracer = trace.get_tracer(__name__)
+    with tracer.start_as_current_span("load balancer test span"):
+        print("tracing enabled")
+
+
+try:
+    init_telemetry('load-tester')
+except Exception as e:
+    print(f"Failed to initialize telemetry: {e}")
 
 class BookTasks(TaskSet):
 
@@ -95,3 +150,5 @@ class BookUser(HttpUser):
     def on_stop(self):
         """Executed when a simulated user stops."""
         pass  # You can add any teardown logic here if needed
+
+
