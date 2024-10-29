@@ -123,6 +123,12 @@ pub fn init_tracing() {
 
     // Build the subscriber by combining layers
     let subscriber = tracing_subscriber::Registry::default()
+        .with(
+            console_subscriber::ConsoleLayer::builder()
+                .with_default_env()
+                .server_addr(([0, 0, 0, 0], 6669))
+                .spawn()
+        )
         .with(otel_log_layer)
         .with(opentelemetry_metrics_layer)
         .with(tracing_opentelemetry_layer)

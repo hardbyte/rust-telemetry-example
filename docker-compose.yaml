@@ -11,6 +11,7 @@ services:
       ENABLE_KAFKA_PRODUCER: "true"
     ports:
       - "8000:8000"
+      - "6669:6669"
     depends_on:
       kafka:
         condition: service_healthy
