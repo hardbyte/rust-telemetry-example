@@ -19,7 +19,7 @@ async fn get_all_books(Extension(con): Extension<PgPool>) -> Result<Json<Vec<Boo
 
     if let Ok(books) = db::get_all_books(&con).await {
         // Now let's add an attribute to the tracing span with the number of books
-        tracing::Span::current().record("num_books", (books.len() as i64));
+        tracing::Span::current().record("num_books", books.len() as i64);
 
         // Fetch 5 book details from the backend service using reqwest-tracing client
         //let _book_details = crate::reqwest_traced_client::fetch_bulk_book_details(&books).await;
