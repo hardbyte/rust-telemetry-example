@@ -3,12 +3,10 @@ name = "bookapp"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 client = { path = "../client" }
-axum-otel-metrics = { git = "https://github.com/hardbyte/axum-otel-metrics" }
-
+tower-otel-http-metrics = { version = "0.6.0", features = ["axum"] }
 
 anyhow = "1.0.86"
 axum = { workspace = true, features=["json"] }
@@ -42,3 +40,4 @@ opentelemetry-appender-tracing = "0.5.0"
 hyper = "1.4.1"
 rand = "0.8.5"
 matchit = "0.8.4"
+console-subscriber = "0.4.1"
