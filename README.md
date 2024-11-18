@@ -45,7 +45,8 @@ docker compose up
 ```
 
 
-```.http request
+```http request
+### GET all books
 GET http://localhost:8000/books
 Accept: application/json
 

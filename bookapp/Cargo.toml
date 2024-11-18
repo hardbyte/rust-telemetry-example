@@ -27,20 +27,13 @@ tracing-opentelemetry = { workspace = true , features=["async-trait"]}
 tracing-subscriber = { version = "0.3.18", features=["fmt", "env-filter", "json", "tracing-log"] }
 reqwest = {workspace = true}
 
-# Reqwest-middleware haven't released for OpenTelemetry 0.25 or 0.26 yet (2024-10-29)
-# main 4e856602f64222c797a62b111d1263aa89726b95
-reqwest-middleware = { git = "https://github.com/TrueLayer/reqwest-middleware", rev = "4e856602f64222c797a62b111d1263aa89726b95", features = ["json"] }
-reqwest-tracing = { git = "https://github.com/TrueLayer/reqwest-middleware", rev = "4e856602f64222c797a62b111d1263aa89726b95", features = ["opentelemetry_0_26"] }
-#reqwest-middleware = { version="0.3.3", features = ["json"] }
-#reqwest-tracing = { version="0.5.3",  features = ["opentelemetry_0_24"] }
+reqwest-middleware = { version="0.4.0", features = ["json"] }
+reqwest-tracing = { version="0.5.4",  features = ["opentelemetry_0_26"] }
 
 futures = "0.3.31"
 
-# https://github.com/davidB/tracing-opentelemetry-instrumentation-sdk/pull/166
-#axum-tracing-opentelemetry = { version = "0.21.1" }
-#tracing-opentelemetry-instrumentation-sdk = { version = "0.21.0", features = ["tracing_level_info"] }
-axum-tracing-opentelemetry = { git = "https://github.com/getong/tracing-opentelemetry-instrumentation-sdk", branch = "opentelemetry-0.26"}
-tracing-opentelemetry-instrumentation-sdk = { git = "https://github.com/getong/tracing-opentelemetry-instrumentation-sdk", branch = "opentelemetry-0.26"}
+axum-tracing-opentelemetry = { version = "0.23.0", features = [] }
+tracing-opentelemetry-instrumentation-sdk = { version = "0.23.0", features = ["tracing_level_info"] }
 
 
 rdkafka = { version = "0.36.2", features = ["tokio"] }

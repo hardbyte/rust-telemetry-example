@@ -22,7 +22,7 @@ async fn get_all_books(Extension(con): Extension<PgPool>) -> Result<Json<Vec<Boo
         tracing::Span::current().record("num_books", books.len() as i64);
 
         // Fetch 5 book details from the backend service using reqwest-tracing client
-        //let _book_details = crate::reqwest_traced_client::fetch_bulk_book_details(&books).await;
+        let _book_details = crate::reqwest_traced_client::fetch_bulk_book_details(&books).await;
 
         let _book_detail_res =
             get_book_details_with_progenitor_client(books.first().unwrap().id).await;
