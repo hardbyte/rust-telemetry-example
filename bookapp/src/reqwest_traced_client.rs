@@ -1,7 +1,7 @@
 use crate::db::Book;
 use reqwest::Client;
 use reqwest_middleware::{ClientBuilder, Extension};
-use reqwest_tracing::TracingMiddleware;
+use reqwest_tracing::{TracingMiddleware, ReqwestOtelSpanBackend};
 
 #[tracing::instrument(skip(books))]
 pub(crate) async fn fetch_bulk_book_details(books: &Vec<Book>) -> Vec<String> {
@@ -15,6 +15,11 @@ pub(crate) async fn fetch_bulk_book_details(books: &Vec<Book>) -> Vec<String> {
         .with_init(Extension(reqwest_tracing::OtelName(
             "backend-client".into(),
         )))
+        .with_init(Extension(
+            reqwest_tracing::OtelPathNames::known_paths([
+                "/books/{bookId}"
+            ]).unwrap()
+        ))
         // Trace HTTP requests. See the tracing crate to make use of these traces.
         .with(TracingMiddleware::default())
         .build();
