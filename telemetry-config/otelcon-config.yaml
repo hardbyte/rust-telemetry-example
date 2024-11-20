@@ -59,6 +59,12 @@ receivers:
           - metric_name: bt.sql_books_count
             value_column: "count"
 
+  httpcheck/app:
+    targets:
+      - endpoint: "http://app:8000/error-injection"
+        method: "GET"
+    collection_interval: 10s
+
 processors:
   resourcedetection:
     detectors: [ env, system ]
@@ -195,6 +201,7 @@ service:
         - sqlquery/metrics
 #        - count
         - exceptions
+        - httpcheck/app
       processors: [memory_limiter, batch]
       exporters: [otlphttp/metrics]
 

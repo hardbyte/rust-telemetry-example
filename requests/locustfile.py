@@ -99,6 +99,8 @@ class BookTasks(TaskSet):
             "title": title,
             "author": author
         }
+        if random.random() > 0.5:
+            payload["extra-data"] = random.randbytes(1000).hex()
         url = "/books/add"
         headers = {"Content-Type": "application/json"}
         with self.client.post(url, data=json.dumps(payload), headers=headers, catch_response=True) as response:

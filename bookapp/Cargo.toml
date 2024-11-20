@@ -6,10 +6,10 @@ edition = "2021"
 
 [dependencies]
 client = { path = "../client" }
-tower-otel-http-metrics = { git = "https://github.com/hardbyte/tower-otel-http-metrics", features = ["axum"], branch = "feature/active-requests-counter" }
+tower-otel-http-metrics = { git = "https://github.com/hardbyte/tower-otel-http-metrics", features = ["axum"], branch = "feature/request-body-size" }
 
 anyhow = "1.0.91"
-axum = { workspace = true, features=["json"] }
+axum = { workspace = true }
 dotenv = "0.15.0"
 opentelemetry = { workspace = true}
 opentelemetry-otlp = { version="0.26.0" , features = [

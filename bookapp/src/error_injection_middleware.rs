@@ -26,7 +26,7 @@ pub struct ErrorInjectionConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct ErrorInjectionConfigInput {
+pub struct ErrorInjectionConfigInput {
     endpoint_pattern: String,
     http_method: String,
     error_rate: f64,
