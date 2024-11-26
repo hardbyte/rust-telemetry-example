@@ -6,22 +6,22 @@ edition = "2021"
 
 [dependencies]
 client = { path = "../client" }
-tower-otel-http-metrics = { git = "https://github.com/hardbyte/tower-otel-http-metrics", features = ["axum"], branch = "feature/request-body-size" }
+tower-otel-http-metrics = { version = "0.10.0", features = ["axum"] }
 
 anyhow = "1.0.91"
 axum = { workspace = true }
 dotenv = "0.15.0"
 opentelemetry = { workspace = true}
-opentelemetry-otlp = { version="0.26.0" , features = [
+opentelemetry-otlp = { version="0.27.0" , features = [
     "serialize",
     "reqwest-client",
 ]}
-opentelemetry_sdk = { version="0.26.0", features = ["trace", "opentelemetry-http", "rt-tokio"]}
+opentelemetry_sdk = { version="0.27.0", features = ["trace", "opentelemetry-http", "rt-tokio"]}
 serde = "1.0.196"
 sqlx = { version = "0.8.0", features = ["runtime-tokio", "postgres"] }
 tokio = { version = "1.41.0", features = ["full", "tracing"] }
 tower = {workspace = true}
-tower-http = { version = "0.6.1", features = ["trace"] }
+tower-http = { version = "0.6.2", features = ["trace"] }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true , features=["async-trait"]}
 tracing-subscriber = { version = "0.3.18", features=["fmt", "env-filter", "json", "tracing-log"] }
@@ -32,17 +32,17 @@ reqwest-tracing = { version="0.5.4",  features = ["opentelemetry_0_26"] }
 
 futures = "0.3.31"
 
-axum-tracing-opentelemetry = { version = "0.23.0", features = [] }
-tracing-opentelemetry-instrumentation-sdk = { version = "0.23.0", features = ["tracing_level_info"] }
+axum-tracing-opentelemetry = { version = "0.24.1", features = [] }
+tracing-opentelemetry-instrumentation-sdk = { version = "0.24.0", features = ["tracing_level_info"] }
 
 
 rdkafka = { version = "0.36.2", features = ["tokio"] }
 serde_json = "1.0.128"
-opentelemetry-http = "0.26.0"
+opentelemetry-http = "0.27.0"
 tracing-loki = "0.2.5"
 hostname = "0.4.0"
-opentelemetry-appender-tracing = "0.26.0"
+opentelemetry-appender-tracing = "0.27.0"
 hyper = "1.5.0"
 rand = "0.8.5"
-matchit = "0.8.4"
+matchit = "0.8.5"
 console-subscriber = "0.4.1"

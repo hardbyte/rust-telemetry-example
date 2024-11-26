@@ -73,7 +73,7 @@ async fn get_book(
     // Create a Counter Instrument.
     let counter = meter.u64_counter("my_book_counter")
         .with_description("Retrieval of a book")
-        .init();
+        .build();
 
     // Add 1 for this book_id to the counter
     counter.add(1, &[opentelemetry::KeyValue::new("book_id", id.to_string())]);
