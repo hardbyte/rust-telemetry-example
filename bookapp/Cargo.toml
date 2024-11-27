@@ -9,7 +9,7 @@ client = { path = "../client" }
 tower-otel-http-metrics = { version = "0.10.0", features = ["axum"] }
 
 anyhow = "1.0.91"
-axum = { workspace = true }
+axum = { workspace = true, features = ["macros", "matched-path", "tracing" ] }
 dotenv = "0.15.0"
 opentelemetry = { workspace = true}
 opentelemetry-otlp = { version="0.27.0" , features = [
