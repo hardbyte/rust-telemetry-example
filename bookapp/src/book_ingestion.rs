@@ -177,6 +177,9 @@ pub async fn run_consumer() -> Result<()> {
                     }
                 };
 
+                // Create a new root span via tracing:
+                let span = tracing::info_span!("book_ingestion", "otel.kind" = "consumer",);
+
                 // Extract tracing context from headers
                 let headers = m.headers();
                 let extractor = HeaderExtractor { headers };
@@ -193,16 +196,15 @@ pub async fn run_consumer() -> Result<()> {
                     "Extracting context from linked span"
                 );
 
-                // Create a new root span and link it to the producer's span
-                // Using tracing-opentelemetry to create a span
-                // Generate a tracing span as usual
-                let span = tracing::info_span!("book_ingestion", "otel.kind" = "consumer",);
-
-                // In this case we don't want to set the parent, as this is a new root span
-                // instead we want to link it to the parent span
+                // link the extracted span context to our current root span
+                // Two options - set the exctracted span as the parent, or just as a reference
                 //span.set_parent(parent_cx);
+
+                // If we don't want to set the parent, and keep this as an independent trace
+                // instead link it to the parent span:
                 // Assign linked trace from external context
-                span.add_link(linked_span_context);
+                let link_attributes = vec![opentelemetry::KeyValue::new("somekey", "somevalue")];
+                span.add_link_with_attributes(linked_span_context, link_attributes);
 
                 span.in_scope(|| {
                     // Deserialize and process the message

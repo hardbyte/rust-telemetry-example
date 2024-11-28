@@ -37,9 +37,9 @@ async fn get_all_books(Extension(con): Extension<PgPool>) -> Result<Json<Vec<Boo
             })
             .collect::<Vec<_>>();
 
-        let _all_book_details = futures::future::join_all(book_details_futures).await;
+        let all_book_details = futures::future::join_all(book_details_futures).await;
 
-        tracing::info!("Got all book details using progenitor");
+        tracing::info!(num_books = all_book_details.len(), "Got all book details using progenitor");
 
         Ok(Json(books))
     } else {
@@ -73,9 +73,9 @@ async fn get_book(
     // Create a Counter Instrument.
     let counter = meter.u64_counter("my_book_counter")
         .with_description("Retrieval of a book")
-        .init();
+        .build();
 
-    // Add 1 for this book_id to the counter
+    // Add 1 for this book_id to the counter. Wouldn't actually want to have book_id as a dimension
     counter.add(1, &[opentelemetry::KeyValue::new("book_id", id.to_string())]);
 
     if let Ok(book) = db::get_book(&con, id).await {
