@@ -1,10 +1,10 @@
 mod book_ingestion;
 mod db;
+mod error_injection_middleware;
 mod reqwest_traced_client;
 mod rest;
 mod topic_management;
 mod tracing_config;
-mod error_injection_middleware;
 
 use opentelemetry::global;
 
@@ -15,9 +15,9 @@ use axum::{Extension, Router};
 use axum_tracing_opentelemetry::middleware::{OtelAxumLayer, OtelInResponseLayer};
 use rdkafka::config::ClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord};
+use tokio::signal::unix::{signal, SignalKind};
 use tower::ServiceBuilder;
 use tower_http::trace::{DefaultMakeSpan, TraceLayer};
-use tokio::signal::unix::{signal, SignalKind};
 
 use crate::db::init_db;
 use sqlx::PgPool;
@@ -25,12 +25,11 @@ use tokio::task;
 use tracing::info;
 
 fn router(connection_pool: PgPool, producer: FutureProducer) -> Router {
-
     // Create the ErrorInjectionConfigStore
     let error_injection_store = std::sync::Arc::new(
-        error_injection_middleware::PostgresErrorInjectionConfigStore::new(connection_pool.clone())
-    ) as std::sync::Arc<dyn error_injection_middleware::ErrorInjectionConfigStore>;
-
+        error_injection_middleware::PostgresErrorInjectionConfigStore::new(connection_pool.clone()),
+    )
+        as std::sync::Arc<dyn error_injection_middleware::ErrorInjectionConfigStore>;
 
     Router::new()
         .nest_service("/books", rest::book_service())
@@ -39,11 +38,13 @@ fn router(connection_pool: PgPool, producer: FutureProducer) -> Router {
         // This layer itself can be traced - so needs to be added before our OtelAxumLayer
         .layer(axum::middleware::from_fn_with_state(
             error_injection_store.clone(),
-            error_injection_middleware::error_injection_middleware)
+            error_injection_middleware::error_injection_middleware,
+        ))
+        .nest_service(
+            "/error-injection",
+            error_injection_middleware::error_injection_service(error_injection_store.clone()),
         )
-        .nest_service("/error-injection", error_injection_middleware::error_injection_service(error_injection_store.clone()))
         .layer(Extension(connection_pool))
-
         // This layer creates a new Tracing span called "request" for each request,
         // it logs headers etc but on its own doesn't do the OTEL trace context propagation.
         // .layer(ServiceBuilder::new().layer(
@@ -53,7 +54,6 @@ fn router(connection_pool: PgPool, producer: FutureProducer) -> Router {
         //             .level(tracing::Level::INFO))
         //
         // ))
-
         // include trace context as header into the response
         .layer(OtelInResponseLayer::default())
         // start OpenTelemetry trace on incoming request
@@ -65,7 +65,6 @@ fn router(connection_pool: PgPool, producer: FutureProducer) -> Router {
                 .build()
                 .expect("Failed to build otel metrics layer"),
         )
-
 
     // Other non-traced routes can go after this:
     //.route("/health", get(health)) // request processed without span / trace
@@ -114,11 +113,9 @@ async fn main() -> Result<()> {
         // Start the server
         let listener = tokio::net::TcpListener::bind("0.0.0.0:8000").await?;
 
-
         info!("Starting webserver");
         axum::serve(listener, app)
             .with_graceful_shutdown(async {
-
                 let mut signal_terminate = signal(SignalKind::terminate()).unwrap();
                 let mut signal_interrupt = signal(SignalKind::interrupt()).unwrap();
 

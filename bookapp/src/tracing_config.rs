@@ -6,7 +6,8 @@ use opentelemetry_sdk::propagation::TraceContextPropagator;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Layer;
 
-fn init_meter_provider() -> Result<opentelemetry_sdk::metrics::SdkMeterProvider, opentelemetry_sdk::metrics::MetricError> {
+fn init_meter_provider(
+) -> Result<opentelemetry_sdk::metrics::SdkMeterProvider, opentelemetry_sdk::metrics::MetricError> {
     let exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_tonic()
         .with_timeout(std::time::Duration::from_secs(10))
@@ -17,9 +18,9 @@ fn init_meter_provider() -> Result<opentelemetry_sdk::metrics::SdkMeterProvider,
     let provider = SdkMeterProvider::builder()
         .with_reader(reader)
         .with_resource(opentelemetry_sdk::Resource::default())
-        .with_resource(opentelemetry_sdk::Resource::new(
-            vec![opentelemetry::KeyValue::new("service.name", "bookapp")]
-        ))
+        .with_resource(opentelemetry_sdk::Resource::new(vec![
+            opentelemetry::KeyValue::new("service.name", "bookapp"),
+        ]))
         .build();
 
     let cloned_provider = provider.clone();
@@ -27,11 +28,10 @@ fn init_meter_provider() -> Result<opentelemetry_sdk::metrics::SdkMeterProvider,
     Ok(provider)
 }
 
-fn init_logger_provider() -> Result<opentelemetry_sdk::logs::LoggerProvider, opentelemetry_sdk::logs::LogError> {
+fn init_logger_provider(
+) -> Result<opentelemetry_sdk::logs::LoggerProvider, opentelemetry_sdk::logs::LogError> {
     // Note Opentelemetry does not provide a global API to manage the logger provider.
-    let exporter = LogExporter::builder()
-        .with_tonic()
-        .build()?;
+    let exporter = LogExporter::builder().with_tonic().build()?;
 
     let provider = LoggerProvider::builder()
         .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
@@ -40,10 +40,8 @@ fn init_logger_provider() -> Result<opentelemetry_sdk::logs::LoggerProvider, ope
     Ok(provider)
 }
 
-
 pub fn init_tracing() {
     opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
-
 
     // Metrics
     let meter_provider = init_meter_provider().unwrap();
@@ -64,7 +62,6 @@ pub fn init_tracing() {
 
     // Explicitly set the tracer provider globally
     opentelemetry::global::set_tracer_provider(tracer_provider.clone());
-
 
     // Filter the tracing layer - we can add custom filters that only impact the tracing layer
     let tracing_level_filter = tracing_subscriber::filter::Targets::new()
@@ -91,11 +88,9 @@ pub fn init_tracing() {
         .with_thread_names(false)
         .compact();
 
-    let fmt_layer = tracing_subscriber::fmt::layer()
-        .event_format(format);
+    let stdout_layer = tracing_subscriber::fmt::layer().event_format(format);
 
-
-    // Logs to OTEL
+    // Layer that directly sends log events to OTEL
     // Note this won't have trace context because that's only known about by the tracing system
     // not the opentelemetry system. https://github.com/open-telemetry/opentelemetry-rust/issues/1378
     let log_provider = init_logger_provider().unwrap();
@@ -107,13 +102,15 @@ pub fn init_tracing() {
     // thus preventing infinite event generation.
     // Note: This will also drop events from these crates used outside the OTLP Exporter.
     // For more details, see: https://github.com/open-telemetry/opentelemetry-rust/issues/761
-    let otel_log_filter = tracing_subscriber::EnvFilter::new("info,backend=debug,bookapp=debug,sqlx=info")
-        .add_directive("hyper=error".parse().unwrap())
-        .add_directive("tonic=error".parse().unwrap())
-        .add_directive("reqwest=error".parse().unwrap());
+    let otel_log_filter =
+        tracing_subscriber::EnvFilter::new("info,backend=debug,bookapp=debug,sqlx=info")
+            .add_directive("hyper=error".parse().unwrap())
+            .add_directive("tonic=error".parse().unwrap())
+            .add_directive("reqwest=error".parse().unwrap());
 
-    let otel_log_layer = opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&log_provider)
-        .with_filter(otel_log_filter);
+    let otel_log_layer =
+        opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&log_provider)
+            .with_filter(otel_log_filter);
 
     // Build the subscriber by combining layers
     let subscriber = tracing_subscriber::Registry::default()
@@ -121,12 +118,12 @@ pub fn init_tracing() {
             console_subscriber::ConsoleLayer::builder()
                 .with_default_env()
                 .server_addr(([0, 0, 0, 0], 6669))
-                .spawn()
+                .spawn(),
         )
         .with(otel_log_layer)
         .with(opentelemetry_metrics_layer)
         .with(tracing_opentelemetry_layer)
-        .with(fmt_layer.with_filter(tracing_subscriber::EnvFilter::from_default_env()));
+        .with(stdout_layer.with_filter(tracing_subscriber::EnvFilter::from_default_env()));
 
     // Set the subscriber as the global default
     tracing::subscriber::set_global_default(subscriber).expect("Failed to set subscriber");

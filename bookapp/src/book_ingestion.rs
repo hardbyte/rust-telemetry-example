@@ -131,9 +131,7 @@ pub async fn send_book_ingestion_message(
     producer
         .send(record, Timeout::Never)
         .await
-        .map_err(|(e, _)| {
-            anyhow::anyhow!("Failed to send message: {:?}", e)
-        })?;
+        .map_err(|(e, _)| anyhow::anyhow!("Failed to send message: {:?}", e))?;
 
     Ok(())
 }
@@ -173,7 +171,7 @@ pub async fn run_consumer() -> Result<()> {
                             error = format!("{e:#}"),
                             "Error while deserializing payload"
                         );
-                        continue
+                        continue;
                     }
                 };
 

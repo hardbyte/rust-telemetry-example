@@ -87,8 +87,6 @@ pub async fn update_book(connection_pool: &PgPool, book: Book) -> Result<i32> {
     Ok(res.rows_affected().try_into().unwrap())
 }
 
-
-
 #[cfg(test)]
 mod test {
     use super::*;

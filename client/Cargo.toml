@@ -8,8 +8,8 @@ edition = "2021"
 [dependencies]
 tracing = { workspace = true }
 reqwest = { workspace = true, features = ["json", "stream"] }
-serde = { version = "1.0.210", features = ["derive", "rc"] }
-serde_json = { version = "1.0.128" }
+serde = { version = "1.0.216", features = ["derive", "rc"] }
+serde_json = { version = "1.0.133" }
 opentelemetry = { workspace = true}
 tracing-opentelemetry = { workspace = true, features=["async-trait"] }
 progenitor-client = { version = "0.8.0" }
@@ -19,5 +19,5 @@ progenitor-client = { version = "0.8.0" }
 progenitor = {version = "0.8.0"}
 quote = "1.0.37"
 serde_yaml = { version = "0.9.34" }
-syn = { version = "2.0.77" }
-prettyplease = { version = "0.2.22" }
+syn = { version = "2.0.90" }
+prettyplease = { version = "0.2.25" }

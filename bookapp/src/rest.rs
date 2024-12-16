@@ -39,7 +39,10 @@ async fn get_all_books(Extension(con): Extension<PgPool>) -> Result<Json<Vec<Boo
 
         let all_book_details = futures::future::join_all(book_details_futures).await;
 
-        tracing::info!(num_books = all_book_details.len(), "Got all book details using progenitor");
+        tracing::info!(
+            num_books = all_book_details.len(),
+            "Got all book details using progenitor"
+        );
 
         Ok(Json(books))
     } else {
@@ -47,7 +50,7 @@ async fn get_all_books(Extension(con): Extension<PgPool>) -> Result<Json<Vec<Boo
     }
 }
 
-#[tracing::instrument()]
+#[tracing::instrument(fields(otel.kind = "client"))]
 async fn get_book_details_with_progenitor_client(
     book_id: i32,
 ) -> Result<client::ResponseValue<client::types::Book>, client::Error> {
@@ -62,21 +65,27 @@ async fn get_book(
     Extension(con): Extension<PgPool>,
     Path(id): Path<i32>,
 ) -> Result<Json<Book>, StatusCode> {
-
     // Metrics can be added to the tracing span directly
     // due to the MetricsLayer
     // https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/struct.MetricsLayer.html
-    tracing::trace!(monotonic_counter.queried_books = 1, book_id = id.to_string());
+    tracing::trace!(
+        monotonic_counter.queried_books = 1,
+        book_id = id.to_string()
+    );
 
     let meter = opentelemetry::global::meter("bookapp");
 
     // Create a Counter Instrument.
-    let counter = meter.u64_counter("my_book_counter")
+    let counter = meter
+        .u64_counter("my_book_counter")
         .with_description("Retrieval of a book")
         .build();
 
     // Add 1 for this book_id to the counter. Wouldn't actually want to have book_id as a dimension
-    counter.add(1, &[opentelemetry::KeyValue::new("book_id", id.to_string())]);
+    counter.add(
+        1,
+        &[opentelemetry::KeyValue::new("book_id", id.to_string())],
+    );
 
     if let Ok(book) = db::get_book(&con, id).await {
         Ok(Json(book))
@@ -150,6 +159,8 @@ async fn queue_background_ingestion_task(producer: &FutureProducer, new_id: i32)
         );
         // Set span status to error
         tracing::Span::current().set_attribute("otel.status_code", "ERROR");
+    } else {
+        tracing::info!(book_id = new_id, "Sent Kafka message");
     }
 }
 

@@ -1,14 +1,15 @@
-use std::sync::Arc;
-use axum::{async_trait, extract::Request, middleware::Next, response::IntoResponse, Extension, Json, Router};
 use axum::extract::{Path, State};
-use hyper::StatusCode;
-use rand::Rng;
-use sqlx::{FromRow, PgPool};
-use matchit::Router as MatchRouter;
-use serde::{Deserialize, Serialize};
+use axum::routing::{delete, get, post, put};
 use axum::{
-    routing::{get, post, put, delete},
+    async_trait, extract::Request, middleware::Next, response::IntoResponse, Extension, Json,
+    Router,
 };
+use hyper::StatusCode;
+use matchit::Router as MatchRouter;
+use rand::Rng;
+use serde::{Deserialize, Serialize};
+use sqlx::{FromRow, PgPool};
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
 pub struct ErrorInjectionConfig {
@@ -47,14 +48,20 @@ pub trait ErrorInjectionConfigStore: Send + Sync + 'static {
     /// # Arguments
     ///
     /// * `method` - The HTTP method to filter configurations by (e.g., "GET").
-    async fn get_configs_for_method(&self, method: &str) -> anyhow::Result<Vec<ErrorInjectionConfig>>;
+    async fn get_configs_for_method(
+        &self,
+        method: &str,
+    ) -> anyhow::Result<Vec<ErrorInjectionConfig>>;
 
     /// Creates a new error injection configuration.
     ///
     /// # Arguments
     ///
     /// * `input` - The input data for the new configuration.
-    async fn create_config(&self, input: ErrorInjectionConfigInput) -> anyhow::Result<ErrorInjectionConfig>;
+    async fn create_config(
+        &self,
+        input: ErrorInjectionConfigInput,
+    ) -> anyhow::Result<ErrorInjectionConfig>;
 
     /// Updates an existing error injection configuration.
     ///
@@ -62,7 +69,11 @@ pub trait ErrorInjectionConfigStore: Send + Sync + 'static {
     ///
     /// * `id` - The ID of the configuration to update.
     /// * `input` - The updated data for the configuration.
-    async fn update_config(&self, id: i32, input: ErrorInjectionConfigInput) -> anyhow::Result<ErrorInjectionConfig>;
+    async fn update_config(
+        &self,
+        id: i32,
+        input: ErrorInjectionConfigInput,
+    ) -> anyhow::Result<ErrorInjectionConfig>;
 
     /// Deletes an error injection configuration.
     ///
@@ -71,7 +82,6 @@ pub trait ErrorInjectionConfigStore: Send + Sync + 'static {
     /// * `id` - The ID of the configuration to delete.
     async fn delete_config(&self, id: i32) -> anyhow::Result<()>;
 }
-
 
 /// Implementation of `ErrorInjectionConfigStore` trait using PostgreSQL as the storage backend.
 #[derive(Clone)]
@@ -99,31 +109,37 @@ impl ErrorInjectionConfigStore for PostgresErrorInjectionConfigStore {
             SELECT id, endpoint_pattern, http_method, error_rate, error_code, error_message
             FROM error_injection_config
             LIMIT 1000
-            "#
+            "#,
         )
-            .fetch_all(&self.pool)
-            .await?;
+        .fetch_all(&self.pool)
+        .await?;
 
         Ok(configs)
     }
 
-    async fn get_configs_for_method(&self, method: &str) -> anyhow::Result<Vec<ErrorInjectionConfig>> {
+    async fn get_configs_for_method(
+        &self,
+        method: &str,
+    ) -> anyhow::Result<Vec<ErrorInjectionConfig>> {
         let configs: Vec<ErrorInjectionConfig> = sqlx::query_as(
             r#"
             SELECT id, endpoint_pattern, http_method, error_rate, error_code, error_message
             FROM error_injection_config
             WHERE http_method = $1
             LIMIT 100
-            "#
+            "#,
         )
-            .bind(method)
-            .fetch_all(&self.pool)
-            .await?;
+        .bind(method)
+        .fetch_all(&self.pool)
+        .await?;
 
         Ok(configs)
     }
 
-    async fn create_config(&self, input: ErrorInjectionConfigInput) -> anyhow::Result<ErrorInjectionConfig> {
+    async fn create_config(
+        &self,
+        input: ErrorInjectionConfigInput,
+    ) -> anyhow::Result<ErrorInjectionConfig> {
         let inserted_config = sqlx::query_as::<_, ErrorInjectionConfig>(
             r#"
             INSERT INTO error_injection_config (endpoint_pattern, http_method, error_rate, error_code, error_message)
@@ -142,7 +158,11 @@ impl ErrorInjectionConfigStore for PostgresErrorInjectionConfigStore {
         Ok(inserted_config)
     }
 
-    async fn update_config(&self, id: i32, input: ErrorInjectionConfigInput) -> anyhow::Result<ErrorInjectionConfig> {
+    async fn update_config(
+        &self,
+        id: i32,
+        input: ErrorInjectionConfigInput,
+    ) -> anyhow::Result<ErrorInjectionConfig> {
         let updated_config = sqlx::query_as::<_, ErrorInjectionConfig>(
             r#"
             UPDATE error_injection_config
@@ -167,16 +187,15 @@ impl ErrorInjectionConfigStore for PostgresErrorInjectionConfigStore {
         sqlx::query(
             r#"
             DELETE FROM error_injection_config WHERE id = $1
-            "#
+            "#,
         )
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
 
         Ok(())
     }
 }
-
 
 /// Handler to retrieve all error injection configurations.
 ///
@@ -320,13 +339,18 @@ pub async fn error_injection_middleware(
             );
             let status_code = StatusCode::from_u16(config.error_code as u16)
                 .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-            let body = config
-                .error_message
-                .unwrap_or_else(|| status_code.canonical_reason().unwrap_or("Injected Error").to_string());
+            let body = config.error_message.unwrap_or_else(|| {
+                status_code
+                    .canonical_reason()
+                    .unwrap_or("Injected Error")
+                    .to_string()
+            });
             return (status_code, body).into_response();
         }
     } else {
-        tracing::trace!(path = path, method = method,
+        tracing::trace!(
+            path = path,
+            method = method,
             "No error injection configured for this endpoint"
         );
     }
@@ -334,7 +358,6 @@ pub async fn error_injection_middleware(
     // Run the next middleware or handler
     next.run(req).await
 }
-
 
 /// Retrieves a matching error injection configuration for the given path and method.
 ///
@@ -376,7 +399,6 @@ async fn get_matching_error_injection_config(
     }
 }
 
-
 /// Creates a router for the error injection configuration service.
 ///
 /// The service provides endpoints to manage error injection configurations:
@@ -389,7 +411,9 @@ async fn get_matching_error_injection_config(
 /// # Returns
 ///
 /// A `Router` instance with the configured routes.
-pub fn error_injection_service(error_injection_store: Arc<dyn ErrorInjectionConfigStore>) -> Router {
+pub fn error_injection_service(
+    error_injection_store: Arc<dyn ErrorInjectionConfigStore>,
+) -> Router {
     Router::new()
         .route("/", get(get_all_configs_handler).post(create_config))
         .route("/:id", put(update_config).delete(delete_config))

@@ -8,7 +8,7 @@ edition = "2021"
 client = { path = "../client" }
 tower-otel-http-metrics = { version = "0.10.0", features = ["axum"] }
 
-anyhow = "1.0.91"
+anyhow = "1.0.94"
 axum = { workspace = true, features = ["macros", "matched-path", "tracing" ] }
 dotenv = "0.15.0"
 opentelemetry = { workspace = true}
@@ -16,19 +16,19 @@ opentelemetry-otlp = { version="0.27.0" , features = [
     "serialize",
     "reqwest-client",
 ]}
-opentelemetry_sdk = { version="0.27.0", features = ["trace", "opentelemetry-http", "rt-tokio"]}
-serde = "1.0.196"
-sqlx = { version = "0.8.0", features = ["runtime-tokio", "postgres"] }
-tokio = { version = "1.41.0", features = ["full", "tracing"] }
+opentelemetry_sdk = { version="0.27.1", features = ["trace", "opentelemetry-http", "rt-tokio", "tracing"]}
+serde = "1.0.216"
+sqlx = { version = "0.8.2", features = ["runtime-tokio", "postgres"] }
+tokio = { version = "1.42.0", features = ["full", "tracing"] }
 tower = {workspace = true}
 tower-http = { version = "0.6.2", features = ["trace"] }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true , features=["async-trait"]}
-tracing-subscriber = { version = "0.3.18", features=["fmt", "env-filter", "json", "tracing-log"] }
+tracing-subscriber = { version = "0.3.19", features=["fmt", "env-filter", "json", "tracing-log"] }
 reqwest = {workspace = true}
 
 reqwest-middleware = { version="0.4.0", features = ["json"] }
-reqwest-tracing = { version="0.5.4",  features = ["opentelemetry_0_26"] }
+reqwest-tracing = { version="0.5.5",  features = ["opentelemetry_0_27"] }
 
 futures = "0.3.31"
 
@@ -36,13 +36,13 @@ axum-tracing-opentelemetry = { version = "0.24.1", features = [] }
 tracing-opentelemetry-instrumentation-sdk = { version = "0.24.0", features = ["tracing_level_info"] }
 
 
-rdkafka = { version = "0.36.2", features = ["tokio"] }
-serde_json = "1.0.128"
+rdkafka = { version = "0.37.0", features = ["tokio"] }
+serde_json = "1.0.133"
 opentelemetry-http = "0.27.0"
 tracing-loki = "0.2.5"
 hostname = "0.4.0"
 opentelemetry-appender-tracing = "0.27.0"
-hyper = "1.5.0"
+hyper = "1.5.1"
 rand = "0.8.5"
 matchit = "0.8.5"
 console-subscriber = "0.4.1"

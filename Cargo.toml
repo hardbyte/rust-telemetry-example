@@ -10,5 +10,5 @@ axum = { version = "0.7.7" }
 tower = "0.5.1"
 reqwest = "0.12.7"
 opentelemetry = "0.27.1"
-tracing = { version = "0.1.40" }
+tracing = { version = "0.1.41" }
 tracing-opentelemetry = { version = "0.28.0" }
