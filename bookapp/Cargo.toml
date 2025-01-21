@@ -8,7 +8,7 @@ edition = "2021"
 client = { path = "../client" }
 tower-otel-http-metrics = { version = "0.10.0", features = ["axum"] }
 
-anyhow = "1.0.94"
+anyhow = "1.0.95"
 axum = { workspace = true, features = ["macros", "matched-path", "tracing" ] }
 dotenv = "0.15.0"
 opentelemetry = { workspace = true}
@@ -17,9 +17,9 @@ opentelemetry-otlp = { version="0.27.0" , features = [
     "reqwest-client",
 ]}
 opentelemetry_sdk = { version="0.27.1", features = ["trace", "opentelemetry-http", "rt-tokio", "tracing"]}
-serde = "1.0.216"
-sqlx = { version = "0.8.2", features = ["runtime-tokio", "postgres"] }
-tokio = { version = "1.42.0", features = ["full", "tracing"] }
+serde = "1.0.217"
+sqlx = { version = "0.8.3", features = ["runtime-tokio", "postgres"] }
+tokio = { version = "1.43", features = ["full", "tracing"] }
 tower = {workspace = true}
 tower-http = { version = "0.6.2", features = ["trace"] }
 tracing = { workspace = true }
@@ -32,17 +32,18 @@ reqwest-tracing = { version="0.5.5",  features = ["opentelemetry_0_27"] }
 
 futures = "0.3.31"
 
-axum-tracing-opentelemetry = { version = "0.24.1", features = [] }
-tracing-opentelemetry-instrumentation-sdk = { version = "0.24.0", features = ["tracing_level_info"] }
+axum-tracing-opentelemetry = { version = "0.25", features = [] }
+tracing-opentelemetry-instrumentation-sdk = { version = "0.24.1", features = ["tracing_level_info"] }
 
 
 rdkafka = { version = "0.37.0", features = ["tokio"] }
-serde_json = "1.0.133"
+serde_json = "1.0.137"
 opentelemetry-http = "0.27.0"
-tracing-loki = "0.2.5"
+tracing-loki = "0.2.6"
 hostname = "0.4.0"
 opentelemetry-appender-tracing = "0.27.0"
-hyper = "1.5.1"
+hyper = "1.5.2"
 rand = "0.8.5"
-matchit = "0.8.5"
+matchit = "0.8"
 console-subscriber = "0.4.1"
+async-trait = "0.1.85"
