@@ -66,16 +66,25 @@ pub mod types {
     /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
     pub struct Book {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub author: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub id: Option<i64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub title: Option<String>,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub author: ::std::option::Option<::std::string::String>,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub id: ::std::option::Option<i64>,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub title: ::std::option::Option<::std::string::String>,
     }
-    impl From<&Book> for Book {
+    impl ::std::convert::From<&Book> for Book {
         fn from(value: &Book) -> Self {
             value.clone()
+        }
+    }
+    impl ::std::default::Default for Book {
+        fn default() -> Self {
+            Self {
+                author: Default::default(),
+                id: Default::default(),
+                title: Default::default(),
+            }
         }
     }
     impl Book {
@@ -109,14 +118,22 @@ pub mod types {
     /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
     pub struct BookCreateIn {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub author: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub title: Option<String>,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub author: ::std::option::Option<::std::string::String>,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub title: ::std::option::Option<::std::string::String>,
     }
-    impl From<&BookCreateIn> for BookCreateIn {
+    impl ::std::convert::From<&BookCreateIn> for BookCreateIn {
         fn from(value: &BookCreateIn) -> Self {
             value.clone()
+        }
+    }
+    impl ::std::default::Default for BookCreateIn {
+        fn default() -> Self {
+            Self {
+                author: Default::default(),
+                title: Default::default(),
+            }
         }
     }
     impl BookCreateIn {
@@ -128,11 +145,17 @@ pub mod types {
     pub mod builder {
         #[derive(Clone, Debug)]
         pub struct Book {
-            author: Result<Option<String>, String>,
-            id: Result<Option<i64>, String>,
-            title: Result<Option<String>, String>,
+            author: ::std::result::Result<
+                ::std::option::Option<::std::string::String>,
+                ::std::string::String,
+            >,
+            id: ::std::result::Result<::std::option::Option<i64>, ::std::string::String>,
+            title: ::std::result::Result<
+                ::std::option::Option<::std::string::String>,
+                ::std::string::String,
+            >,
         }
-        impl Default for Book {
+        impl ::std::default::Default for Book {
             fn default() -> Self {
                 Self {
                     author: Ok(Default::default()),
@@ -144,8 +167,8 @@ pub mod types {
         impl Book {
             pub fn author<T>(mut self, value: T) -> Self
             where
-                T: std::convert::TryInto<Option<String>>,
-                T::Error: std::fmt::Display,
+                T: ::std::convert::TryInto<::std::option::Option<::std::string::String>>,
+                T::Error: ::std::fmt::Display,
             {
                 self.author = value
                     .try_into()
@@ -154,8 +177,8 @@ pub mod types {
             }
             pub fn id<T>(mut self, value: T) -> Self
             where
-                T: std::convert::TryInto<Option<i64>>,
-                T::Error: std::fmt::Display,
+                T: ::std::convert::TryInto<::std::option::Option<i64>>,
+                T::Error: ::std::fmt::Display,
             {
                 self.id = value
                     .try_into()
@@ -164,8 +187,8 @@ pub mod types {
             }
             pub fn title<T>(mut self, value: T) -> Self
             where
-                T: std::convert::TryInto<Option<String>>,
-                T::Error: std::fmt::Display,
+                T: ::std::convert::TryInto<::std::option::Option<::std::string::String>>,
+                T::Error: ::std::fmt::Display,
             {
                 self.title = value
                     .try_into()
@@ -173,9 +196,9 @@ pub mod types {
                 self
             }
         }
-        impl std::convert::TryFrom<Book> for super::Book {
+        impl ::std::convert::TryFrom<Book> for super::Book {
             type Error = super::error::ConversionError;
-            fn try_from(value: Book) -> Result<Self, super::error::ConversionError> {
+            fn try_from(value: Book) -> ::std::result::Result<Self, super::error::ConversionError> {
                 Ok(Self {
                     author: value.author?,
                     id: value.id?,
@@ -183,7 +206,7 @@ pub mod types {
                 })
             }
         }
-        impl From<super::Book> for Book {
+        impl ::std::convert::From<super::Book> for Book {
             fn from(value: super::Book) -> Self {
                 Self {
                     author: Ok(value.author),
@@ -194,10 +217,16 @@ pub mod types {
         }
         #[derive(Clone, Debug)]
         pub struct BookCreateIn {
-            author: Result<Option<String>, String>,
-            title: Result<Option<String>, String>,
+            author: ::std::result::Result<
+                ::std::option::Option<::std::string::String>,
+                ::std::string::String,
+            >,
+            title: ::std::result::Result<
+                ::std::option::Option<::std::string::String>,
+                ::std::string::String,
+            >,
         }
-        impl Default for BookCreateIn {
+        impl ::std::default::Default for BookCreateIn {
             fn default() -> Self {
                 Self {
                     author: Ok(Default::default()),
@@ -208,8 +237,8 @@ pub mod types {
         impl BookCreateIn {
             pub fn author<T>(mut self, value: T) -> Self
             where
-                T: std::convert::TryInto<Option<String>>,
-                T::Error: std::fmt::Display,
+                T: ::std::convert::TryInto<::std::option::Option<::std::string::String>>,
+                T::Error: ::std::fmt::Display,
             {
                 self.author = value
                     .try_into()
@@ -218,8 +247,8 @@ pub mod types {
             }
             pub fn title<T>(mut self, value: T) -> Self
             where
-                T: std::convert::TryInto<Option<String>>,
-                T::Error: std::fmt::Display,
+                T: ::std::convert::TryInto<::std::option::Option<::std::string::String>>,
+                T::Error: ::std::fmt::Display,
             {
                 self.title = value
                     .try_into()
@@ -227,16 +256,18 @@ pub mod types {
                 self
             }
         }
-        impl std::convert::TryFrom<BookCreateIn> for super::BookCreateIn {
+        impl ::std::convert::TryFrom<BookCreateIn> for super::BookCreateIn {
             type Error = super::error::ConversionError;
-            fn try_from(value: BookCreateIn) -> Result<Self, super::error::ConversionError> {
+            fn try_from(
+                value: BookCreateIn,
+            ) -> ::std::result::Result<Self, super::error::ConversionError> {
                 Ok(Self {
                     author: value.author?,
                     title: value.title?,
                 })
             }
         }
-        impl From<super::BookCreateIn> for BookCreateIn {
+        impl ::std::convert::From<super::BookCreateIn> for BookCreateIn {
             fn from(value: super::BookCreateIn) -> Self {
                 Self {
                     author: Ok(value.author),
@@ -408,7 +439,7 @@ pub mod builder {
             Self { client: client }
         }
         ///Sends a `GET` request to `/books/`
-        pub async fn send(self) -> Result<ResponseValue<Vec<types::Book>>, Error<()>> {
+        pub async fn send(self) -> Result<ResponseValue<::std::vec::Vec<types::Book>>, Error<()>> {
             let Self { client } = self;
             let url = format!("{}/books/", client.baseurl,);
             #[allow(unused_mut)]
@@ -450,7 +481,7 @@ pub mod builder {
         pub fn new(client: &'a super::Client) -> Self {
             Self {
                 client: client,
-                body: Ok(types::builder::BookCreateIn::default()),
+                body: Ok(::std::default::Default::default()),
             }
         }
         pub fn body<V>(mut self, value: V) -> Self
@@ -625,7 +656,7 @@ pub mod builder {
             Self {
                 client: client,
                 id: Err("id was not initialized".to_string()),
-                body: Ok(types::builder::BookCreateIn::default()),
+                body: Ok(::std::default::Default::default()),
             }
         }
         pub fn id<V>(mut self, value: V) -> Self
