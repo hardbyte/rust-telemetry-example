@@ -33,7 +33,7 @@ reqwest-tracing = { version="0.5.5",  features = ["opentelemetry_0_27"] }
 futures = "0.3.31"
 
 axum-tracing-opentelemetry = { version = "0.25", features = [] }
-tracing-opentelemetry-instrumentation-sdk = { version = "0.24.1", features = ["tracing_level_info"] }
+tracing-opentelemetry-instrumentation-sdk = { version = "0.24.2", features = ["tracing_level_info"] }
 
 
 rdkafka = { version = "0.37.0", features = ["tokio"] }
@@ -42,8 +42,8 @@ opentelemetry-http = "0.27.0"
 tracing-loki = "0.2.6"
 hostname = "0.4.0"
 opentelemetry-appender-tracing = "0.27.0"
-hyper = "1.5.2"
-rand = "0.8.5"
-matchit = "0.8"
+hyper = "1.6.0"
+rand = "0.9.0"
+matchit = "^0.8"
 console-subscriber = "0.4.1"
-async-trait = "0.1.85"
+async-trait = "0.1.86"

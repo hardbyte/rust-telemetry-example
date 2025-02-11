@@ -1,4 +1,4 @@
-use crate::db::{Book, BookCreateIn};
+use crate::db::{Book, BookCreateIn, BookStatus};
 use crate::{db, reqwest_traced_client};
 use axum::extract::{Path, Query};
 use axum::http::StatusCode;
@@ -17,36 +17,41 @@ use client::Client;
 async fn get_all_books(Extension(con): Extension<PgPool>) -> Result<Json<Vec<Book>>, StatusCode> {
     tracing::info!("Getting all books");
 
-    if let Ok(books) = db::get_all_books(&con).await {
-        // Now let's add an attribute to the tracing span with the number of books
-        tracing::Span::current().record("num_books", books.len() as i64);
+    match db::get_all_books(&con).await
+    {
+        Ok(books) => {
+            // Now let's add an attribute to the tracing span with the number of books
+            tracing::Span::current().record("num_books", books.len() as i64);
 
-        // Fetch 5 book details from the backend service using reqwest-tracing client
-        let _book_details = crate::reqwest_traced_client::fetch_bulk_book_details(&books).await;
+            // Fetch 5 book details from the backend service using reqwest-tracing client
+            let _book_details = crate::reqwest_traced_client::fetch_bulk_book_details(&books).await;
 
-        let _book_detail_res =
-            get_book_details_with_progenitor_client(books.first().unwrap().id).await;
-        let span = tracing::info_span!("tokio_spawned_requests");
+            let _book_detail_res =
+                get_book_details_with_progenitor_client(books.first().unwrap().id).await;
+            let span = tracing::info_span!("tokio_spawned_requests");
 
-        let book_details_futures = books
-            .iter()
-            .take(5)
-            .map(|b: &Book| b.id)
-            .map(|id| {
-                tokio::spawn(get_book_details_with_progenitor_client(id).instrument(span.clone()))
-            })
-            .collect::<Vec<_>>();
+            let book_details_futures = books
+                .iter()
+                .take(5)
+                .map(|b: &Book| b.id)
+                .map(|id| {
+                    tokio::spawn(get_book_details_with_progenitor_client(id).instrument(span.clone()))
+                })
+                .collect::<Vec<_>>();
 
-        let all_book_details = futures::future::join_all(book_details_futures).await;
+            let all_book_details = futures::future::join_all(book_details_futures).await;
 
-        tracing::info!(
-            num_books = all_book_details.len(),
-            "Got all book details using progenitor"
-        );
+            tracing::info!(
+                num_books = all_book_details.len(),
+                "Got all book details using progenitor"
+            );
 
-        Ok(Json(books))
-    } else {
-        Err(StatusCode::SERVICE_UNAVAILABLE)
+            Ok(Json(books))
+        }
+        Err(e) => {
+            tracing::error!(error_details=%e, "Failed to get all books");
+            Err(StatusCode::SERVICE_UNAVAILABLE)
+        }
     }
 }
 
@@ -110,12 +115,13 @@ async fn delete_book(
 async fn update_book(
     Extension(con): Extension<PgPool>,
     Path(id): Path<i32>,
-    extract::Json(book_data): extract::Json<BookCreateIn>,
+    Json(book_data): Json<BookCreateIn>,
 ) -> Result<Json<i32>, StatusCode> {
     let book = Book {
         id,
         author: book_data.author,
         title: book_data.title,
+        status: BookStatus::Available,
     };
     if let Ok(id) = db::update_book(&con, book).await {
         Ok(Json(id))
@@ -167,8 +173,8 @@ async fn queue_background_ingestion_task(producer: &FutureProducer, new_id: i32)
 pub fn book_service() -> Router {
     Router::new()
         .route("/", get(get_all_books))
-        .route("/:id", get(get_book))
-        .route("/:id", patch(update_book))
+        .route("/{id}", get(get_book))
+        .route("/{id}", patch(update_book))
         .route("/add", post(create_book))
-        .route("/:id", delete(delete_book))
+        .route("/{id}", delete(delete_book))
 }

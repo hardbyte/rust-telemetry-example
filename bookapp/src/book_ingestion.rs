@@ -11,7 +11,7 @@ use rdkafka::{
     producer::{FutureProducer, FutureRecord},
 };
 use serde::{Deserialize, Serialize};
-use tracing::{error, info, info_span};
+use tracing::{error, info};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 #[derive(Serialize, Deserialize, Debug)]

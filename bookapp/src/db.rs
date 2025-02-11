@@ -1,16 +1,23 @@
 use anyhow::{Context, Ok, Result};
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
-use sqlx::{FromRow, PgPool, Row};
-use tracing::{debug, info, info_span, span};
+use sqlx::{FromRow, PgPool, Row, Type};
+use tracing::{debug, info};
 
 #[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
 pub struct BookCreateIn {
     pub title: String,
     pub author: String,
+    pub status: BookStatus,
 }
 
-// pub type Book = WithID<BookCreateIn>;
+#[derive(Debug, Serialize, Deserialize, Type, Clone)]
+#[sqlx(type_name = "book_status", rename_all = "lowercase")]
+pub enum BookStatus {
+    Available,
+    Borrowed,
+    Lost,
+}
 
 #[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
 pub struct Book {
@@ -19,6 +26,8 @@ pub struct Book {
     pub title: String,
 
     pub author: String,
+
+    pub status: BookStatus,
 }
 
 pub async fn init_db() -> Result<PgPool> {
