@@ -1,7 +1,7 @@
 CREATE table if not exists books (
     id serial primary key,
-    title text,
-    author text
+    title text not null,
+    author text not null
 );
 
 

@@ -8,4 +8,5 @@ create type book_status as enum ('available', 'borrowed', 'lost');
 -- );
 
 -- Add a column for book status
-alter table books add column status book_status default 'available';
+alter table books add column status book_status default 'available' not null;
+

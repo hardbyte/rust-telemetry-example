@@ -17,8 +17,7 @@ use client::Client;
 async fn get_all_books(Extension(con): Extension<PgPool>) -> Result<Json<Vec<Book>>, StatusCode> {
     tracing::info!("Getting all books");
 
-    match db::get_all_books(&con).await
-    {
+    match db::get_all_books(&con).await {
         Ok(books) => {
             // Now let's add an attribute to the tracing span with the number of books
             tracing::Span::current().record("num_books", books.len() as i64);
@@ -35,7 +34,9 @@ async fn get_all_books(Extension(con): Extension<PgPool>) -> Result<Json<Vec<Boo
                 .take(5)
                 .map(|b: &Book| b.id)
                 .map(|id| {
-                    tokio::spawn(get_book_details_with_progenitor_client(id).instrument(span.clone()))
+                    tokio::spawn(
+                        get_book_details_with_progenitor_client(id).instrument(span.clone()),
+                    )
                 })
                 .collect::<Vec<_>>();
 
@@ -134,9 +135,9 @@ async fn update_book(
 async fn create_book(
     Extension(con): Extension<PgPool>,
     Extension(producer): Extension<FutureProducer>,
-    Json(book): extract::Json<BookCreateIn>,
+    Json(book): Json<BookCreateIn>,
 ) -> Result<Json<i32>, StatusCode> {
-    if let Ok(new_id) = db::create_book(&con, book.author, book.title).await {
+    if let Ok(new_id) = db::create_book(&con, book.author, book.title, book.status).await {
         queue_background_ingestion_task(&producer, new_id).await;
 
         Ok(Json(new_id))

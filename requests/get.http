@@ -4,7 +4,7 @@ GET http://localhost:8000/books
 Accept: application/json
 
 ### GET a book
-GET http://localhost:8000/books/10
+GET http://localhost:8000/books/98
 Accept: application/json
 
 ### Create a book
@@ -14,6 +14,26 @@ Content-Type: application/json
 {
   "title": "The Great Gatsby",
   "author": "F. Scott Fitzgerald"
+}
+
+### Create a book with optional status
+POST http://localhost:8000/books/add
+Content-Type: application/json
+
+{
+  "title": "The Great Gatsby",
+  "author": "F. Scott Fitzgerald",
+  "status": "Lost"
+}
+
+### Create a book with incorrect status
+POST http://localhost:8000/books/add
+Content-Type: application/json
+
+{
+  "title": "The Great Gatsby",
+  "author": "F. Scott Fitzgerald",
+  "status": "unknown"
 }
 
 ### Delete a book

@@ -37,6 +37,13 @@ kafka exporting them all to Prometheus.
 ![img.png](.github/metrics.png)
 
 
+You can carry out metric queries against traces in Grafana:
+
+```promql
+```traceql
+{ event.target ="sqlx::query" && event.summary =~ "insert.*"} | quantile_over_time(duration, 0.95) by (event.summary)
+```
+
 ## Running locally
 
 ```shell
@@ -82,3 +89,13 @@ sqlx migrate run
 sqlx migrate add <new migration>
 ```
 
+## Compile Time Checked Postgres Queries
+
+The `sqlx` crate is used with the query! macro to provide compile time checked queries.
+
+If you change the queries, compile with `DATABASE_URL` set to a valid postgres connection string.
+Prepared metadata is stored in workspace level `.sqlx` directory.
+
+```shell
+cargo sqlx prepare --workspace
+```

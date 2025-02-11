@@ -1,9 +1,9 @@
-use std::iter::Take;
-use std::slice::Iter;
 use crate::db::Book;
 use reqwest::Client;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware, Extension};
 use reqwest_tracing::{ReqwestOtelSpanBackend, TracingMiddleware};
+use std::iter::Take;
+use std::slice::Iter;
 use tracing::instrument;
 
 #[tracing::instrument(skip(books))]
@@ -40,25 +40,29 @@ pub(crate) async fn fetch_bulk_book_details(books: &Vec<Book>) -> Vec<String> {
 
 #[instrument(skip_all)]
 async fn fetch_some_books_in_parallel(http_client: ClientWithMiddleware, some_books: &Vec<Book>) {
-    let futures = some_books.into_iter().take(5)
-        .map(|book| {
-            let http_client = http_client.clone();
-            async move {
-                tracing::debug!(id=book.id, "Getting one book from backend");
-                let r = http_client.get(format!("http://backend:8000/books/{}", book.id))
-                    .send()
-                    .await
-                    .expect("failed to get response from backend");
+    let futures = some_books.into_iter().take(5).map(|book| {
+        let http_client = http_client.clone();
+        async move {
+            tracing::debug!(id = book.id, "Getting one book from backend");
+            let r = http_client
+                .get(format!("http://backend:8000/books/{}", book.id))
+                .send()
+                .await
+                .expect("failed to get response from backend");
 
-                r.text().await.unwrap()
-            }
-        });
+            r.text().await.unwrap()
+        }
+    });
 
     let _book_details: Vec<String> = futures::future::join_all(futures).await;
 }
 
 #[instrument(skip_all)]
-async fn fetch_some_books_sequentially(http_client: &ClientWithMiddleware, seq_book_details: &mut Vec<String>, some_books: &Vec<Book>) {
+async fn fetch_some_books_sequentially(
+    http_client: &ClientWithMiddleware,
+    seq_book_details: &mut Vec<String>,
+    some_books: &Vec<Book>,
+) {
     for book in some_books.into_iter().take(5) {
         let r = http_client
             .get(format!("http://backend:8000/books/{}", book.id))

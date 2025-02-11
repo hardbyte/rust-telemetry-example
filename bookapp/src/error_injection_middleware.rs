@@ -1,16 +1,13 @@
+use async_trait::async_trait;
 use axum::extract::{Path, State};
 use axum::routing::{delete, get, post, put};
-use axum::{
-    extract::Request, middleware::Next, response::IntoResponse, Extension, Json,
-    Router,
-};
+use axum::{extract::Request, middleware::Next, response::IntoResponse, Extension, Json, Router};
 use hyper::StatusCode;
 use matchit::Router as MatchRouter;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgPool};
 use std::sync::Arc;
-use async_trait::async_trait;
 
 #[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
 pub struct ErrorInjectionConfig {
