@@ -56,7 +56,7 @@ async fn get_all_books(Extension(con): Extension<PgPool>) -> Result<Json<Vec<Boo
     }
 }
 
-#[tracing::instrument(fields(otel.kind = "Client"))]
+#[tracing::instrument(fields(book_id, otel.kind = "Client"))]
 async fn get_book_details_with_progenitor_client(
     book_id: i32,
 ) -> Result<client::ResponseValue<client::types::Book>, client::Error> {
