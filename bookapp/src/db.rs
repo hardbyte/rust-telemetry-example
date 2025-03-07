@@ -8,7 +8,7 @@ use tracing::{debug, info};
 pub struct BookCreateIn {
     pub title: String,
     pub author: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub status: Option<BookStatus>,
 }
 
@@ -78,22 +78,24 @@ pub async fn get_book(connection_pool: &PgPool, id: i32) -> Result<Book> {
     .await?)
 }
 
+#[tracing::instrument(skip(connection_pool), name = "create_book_in_db")]
 pub async fn create_book(
     connection_pool: &PgPool,
     author: String,
     title: String,
-    status: Option<BookStatus>,
+    status: BookStatus,
 ) -> Result<i32> {
     Ok(sqlx::query!(
         r#"insert into books (title, author, status) VALUES ($1, $2, $3) returning id"#,
         title,
         author,
-        status as Option<BookStatus>,
+        status as BookStatus,
     )
     .fetch_one(connection_pool)
     .await?
     .id)
 }
+
 pub async fn delete_book(connection_pool: &PgPool, id: i32) -> Result<()> {
     sqlx::query!("delete from books where id=$1", id)
         .execute(connection_pool)

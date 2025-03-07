@@ -325,8 +325,8 @@ pub async fn error_injection_middleware(
         tracing::Span::current().record("error_rate", &config.error_rate);
 
         // Generate a random number between 0.0 and 1.0
-        let mut rng = rand::thread_rng();
-        let random_value: f64 = rng.gen();
+        let mut rng = rand::rng();
+        let random_value: f64 = rng.random();
 
         if random_value < config.error_rate {
             tracing::debug!(
@@ -414,6 +414,6 @@ pub fn error_injection_service(
 ) -> Router {
     Router::new()
         .route("/", get(get_all_configs_handler).post(create_config))
-        .route("/:id", put(update_config).delete(delete_config))
+        .route("/{id}", put(update_config).delete(delete_config))
         .layer(Extension(error_injection_store))
 }

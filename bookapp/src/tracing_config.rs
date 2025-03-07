@@ -1,26 +1,26 @@
 use opentelemetry::trace::TracerProvider;
 use opentelemetry_otlp::{LogExporter, WithExportConfig};
-use opentelemetry_sdk::logs::LoggerProvider;
-use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
+use opentelemetry_sdk::logs::SdkLoggerProvider;
+use opentelemetry_sdk::metrics::{SdkMeterProvider};
 use opentelemetry_sdk::propagation::TraceContextPropagator;
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Layer;
 
 fn init_meter_provider(
-) -> Result<opentelemetry_sdk::metrics::SdkMeterProvider, opentelemetry_sdk::metrics::MetricError> {
+) -> Result<SdkMeterProvider, opentelemetry_sdk::metrics::MetricError> {
     let exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_tonic()
         .with_timeout(std::time::Duration::from_secs(10))
         .build()?;
 
-    let reader = PeriodicReader::builder(exporter, opentelemetry_sdk::runtime::Tokio).build();
-
     let provider = SdkMeterProvider::builder()
-        .with_reader(reader)
-        .with_resource(opentelemetry_sdk::Resource::default())
-        .with_resource(opentelemetry_sdk::Resource::new(vec![
-            opentelemetry::KeyValue::new("service.name", "bookapp"),
-        ]))
+        .with_periodic_exporter(exporter)
+        .with_resource(
+            opentelemetry_sdk::Resource::builder()
+                .with_attributes(vec![opentelemetry::KeyValue::new("service.name", "bookapp")])
+                .build()
+        )
         .build();
 
     let cloned_provider = provider.clone();
@@ -29,38 +29,46 @@ fn init_meter_provider(
 }
 
 fn init_logger_provider(
-) -> Result<opentelemetry_sdk::logs::LoggerProvider, opentelemetry_sdk::logs::LogError> {
+) -> Result<opentelemetry_sdk::logs::SdkLoggerProvider, opentelemetry_sdk::logs::LogError> {
     // Note Opentelemetry does not provide a global API to manage the logger provider.
-    let exporter = LogExporter::builder().with_tonic().build()?;
+    let exporter = LogExporter::builder()
+        .with_tonic()
+        .build()?;
 
-    let provider = LoggerProvider::builder()
-        .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
-        .build();
-
-    Ok(provider)
+    Ok(SdkLoggerProvider::builder()
+        //.with_resource()
+        .with_batch_exporter(exporter)
+        .build())
 }
 
-pub fn init_tracing() {
+pub fn init_tracing() -> (
+    SdkTracerProvider, SdkMeterProvider, SdkLoggerProvider
+) {
     opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
 
     // Metrics
     let meter_provider = init_meter_provider().unwrap();
-    let opentelemetry_metrics_layer = tracing_opentelemetry::MetricsLayer::new(meter_provider);
+    let opentelemetry_metrics_layer = tracing_opentelemetry::MetricsLayer::new(meter_provider.clone());
 
     // Tracing
     // Uses OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
-    // Assumes a GRPC endpoint (e.g port 4317)
+    // Assumes a GRPC endpoint (e.g., port 4317)
     let exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_tonic()
         .build()
-        .unwrap();
+        .expect("Failed to create OTLP span exporter");
 
-    let tracer_provider = opentelemetry_sdk::trace::TracerProvider::builder()
-        .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
+    let tracer_provider = SdkTracerProvider::builder()
+        .with_batch_exporter(exporter)
         //.with_resource(opentelemetry_sdk::Resource::default())
         .build();
 
     // Explicitly set the tracer provider globally
+    // Setting global tracer provider is required if other parts of the application
+    // uses global::tracer() or global::tracer_with_version() to get a tracer.
+    // Cloning simply creates a new reference to the same tracer provider. It is
+    // important to hold on to the tracer_provider here, to invoke
+    // shutdown on it when application ends.
     opentelemetry::global::set_tracer_provider(tracer_provider.clone());
 
     // Filter the tracing layer - we can add custom filters that only impact the tracing layer
@@ -127,4 +135,7 @@ pub fn init_tracing() {
 
     // Set the subscriber as the global default
     tracing::subscriber::set_global_default(subscriber).expect("Failed to set subscriber");
+
+    // Return the tracer, meter and logger provider as a tuple for shutdown
+    (tracer_provider, meter_provider, log_provider)
 }

@@ -176,7 +176,7 @@ pub async fn run_consumer() -> Result<()> {
                 };
 
                 // Create a new root span via tracing:
-                let span = tracing::info_span!("book_ingestion", "otel.kind" = "consumer",);
+                let span = tracing::info_span!("book_ingestion", "otel.kind" = "Consumer");
 
                 // Extract tracing context from headers
                 let headers = m.headers();
