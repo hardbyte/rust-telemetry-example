@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::routing::{delete, get, patch, post};
 use axum::{extract, http::Request, Extension, Json, Router};
 
-use opentelemetry::trace::TraceContextExt;
+use opentelemetry::trace::{TraceContextExt, SpanKind};
 use rdkafka::producer::FutureProducer;
 use sqlx::PgPool;
 use tracing::{Instrument, Level};
@@ -56,7 +56,7 @@ async fn get_all_books(Extension(con): Extension<PgPool>) -> Result<Json<Vec<Boo
     }
 }
 
-#[tracing::instrument(fields(otel.kind = "client"))]
+#[tracing::instrument(fields(otel.kind = "Client"))]
 async fn get_book_details_with_progenitor_client(
     book_id: i32,
 ) -> Result<client::ResponseValue<client::types::Book>, client::Error> {
@@ -137,16 +137,16 @@ async fn create_book(
     Extension(producer): Extension<FutureProducer>,
     Json(book): Json<BookCreateIn>,
 ) -> Result<Json<i32>, StatusCode> {
-    if let Ok(new_id) = db::create_book(&con, book.author, book.title, book.status).await {
+    let status = book.status.unwrap_or(BookStatus::Available);
+    if let Ok(new_id) = db::create_book(&con, book.author, book.title, status).await {
         queue_background_ingestion_task(&producer, new_id).await;
-
         Ok(Json(new_id))
     } else {
-        Err(StatusCode::NOT_FOUND)
+        Err(StatusCode::INTERNAL_SERVER_ERROR)
     }
 }
 
-#[tracing::instrument(skip(producer), fields(otel.kind = "producer"))]
+#[tracing::instrument(skip(producer), fields(otel.kind = "Producer"))]
 async fn queue_background_ingestion_task(producer: &FutureProducer, new_id: i32) {
     // Prepare message
     let book_message = crate::book_ingestion::BookIngestionMessage { book_id: new_id };

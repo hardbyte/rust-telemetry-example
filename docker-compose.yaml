@@ -81,7 +81,7 @@ services:
 
 
   telemetry:
-    image: grafana/otel-lgtm:0.8.4
+    image: grafana/otel-lgtm:0.8.5
     depends_on:
       db:
         condition: service_healthy
