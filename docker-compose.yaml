@@ -81,7 +81,7 @@ services:
 
 
   telemetry:
-    image: grafana/otel-lgtm:0.8.5
+    image: grafana/otel-lgtm:0.11.0
     depends_on:
       db:
         condition: service_healthy
@@ -94,6 +94,8 @@ services:
       GF_AUTH_ANONYMOUS_ORG_NAME: 'Main Org.'
       GF_AUTH_DISABLE_LOGIN_FORM: 'true'
       ENABLE_LOGS_PROMETHEUS: 'true'
+      # https://grafana.com/docs/grafana/latest/setup-grafana/installation/docker/#install-plugins-in-the-docker-container
+      GF_PLUGINS_PREINSTALL: 'grafana-exploretraces-app'
       #AXIOM_API_KEY: ''
     ports:
       - "4317:4317"
