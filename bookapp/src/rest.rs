@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::routing::{delete, get, patch, post};
 use axum::{extract, http::Request, Extension, Json, Router};
 
-use opentelemetry::trace::{TraceContextExt, SpanKind};
+use opentelemetry::trace::{SpanKind, TraceContextExt};
 use rdkafka::producer::FutureProducer;
 use sqlx::PgPool;
 use tracing::{Instrument, Level};

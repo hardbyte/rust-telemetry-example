@@ -1,14 +1,13 @@
 use opentelemetry::trace::TracerProvider;
 use opentelemetry_otlp::{LogExporter, WithExportConfig};
 use opentelemetry_sdk::logs::SdkLoggerProvider;
-use opentelemetry_sdk::metrics::{SdkMeterProvider};
+use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Layer;
 
-fn init_meter_provider(
-) -> Result<SdkMeterProvider, opentelemetry_sdk::metrics::MetricError> {
+fn init_meter_provider() -> Result<SdkMeterProvider, opentelemetry_otlp::ExporterBuildError> {
     let exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_tonic()
         .with_timeout(std::time::Duration::from_secs(10))
@@ -18,8 +17,11 @@ fn init_meter_provider(
         .with_periodic_exporter(exporter)
         .with_resource(
             opentelemetry_sdk::Resource::builder()
-                .with_attributes(vec![opentelemetry::KeyValue::new("service.name", "bookapp")])
-                .build()
+                .with_attributes(vec![opentelemetry::KeyValue::new(
+                    "service.name",
+                    "bookapp",
+                )])
+                .build(),
         )
         .build();
 
@@ -28,12 +30,9 @@ fn init_meter_provider(
     Ok(provider)
 }
 
-fn init_logger_provider(
-) -> Result<opentelemetry_sdk::logs::SdkLoggerProvider, opentelemetry_sdk::logs::LogError> {
+fn init_logger_provider() -> Result<SdkLoggerProvider, opentelemetry_otlp::ExporterBuildError> {
     // Note Opentelemetry does not provide a global API to manage the logger provider.
-    let exporter = LogExporter::builder()
-        .with_tonic()
-        .build()?;
+    let exporter = LogExporter::builder().with_tonic().build()?;
 
     Ok(SdkLoggerProvider::builder()
         //.with_resource()
@@ -41,14 +40,13 @@ fn init_logger_provider(
         .build())
 }
 
-pub fn init_tracing() -> (
-    SdkTracerProvider, SdkMeterProvider, SdkLoggerProvider
-) {
+pub fn init_tracing() -> (SdkTracerProvider, SdkMeterProvider, SdkLoggerProvider) {
     opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
 
     // Metrics
     let meter_provider = init_meter_provider().unwrap();
-    let opentelemetry_metrics_layer = tracing_opentelemetry::MetricsLayer::new(meter_provider.clone());
+    let opentelemetry_metrics_layer =
+        tracing_opentelemetry::MetricsLayer::new(meter_provider.clone());
 
     // Tracing
     // Uses OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
