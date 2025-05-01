@@ -126,6 +126,28 @@ pub async fn update_book(connection_pool: &PgPool, book: Book) -> Result<i32> {
     Ok(res.rows_affected().try_into().unwrap())
 }
 
+/// Insert a whole slice of `BookCreateIn` in one go and return their new IDs.
+pub async fn bulk_insert_books(pool: &PgPool, books: &[BookCreateIn]) -> Result<Vec<i32>> {
+    // Build a single multi-row INSERT … RETURNING id
+    let mut qb: sqlx::QueryBuilder<sqlx::Postgres> =
+        sqlx::QueryBuilder::new("INSERT INTO books (title, author, status) ");
+    qb.push_values(books.iter(), |mut b, book| {
+        let status = book.status.clone().unwrap_or(BookStatus::Available);
+        b.push_bind(&book.title)
+            .push_bind(&book.author)
+            .push_bind(status as BookStatus);
+    });
+    qb.push(" RETURNING id");
+
+    let rows = qb
+        .build_query_as::<(i32,)>()
+        .fetch_all(pool)
+        .await
+        .context("bulk insert failed")?;
+
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

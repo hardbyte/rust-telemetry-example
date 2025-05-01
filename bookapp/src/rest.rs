@@ -146,6 +146,23 @@ async fn create_book(
     }
 }
 
+#[tracing::instrument(skip(con), fields(num_books))]
+async fn bulk_create_books(
+    Extension(con): Extension<PgPool>,
+    Json(payload): Json<Vec<BookCreateIn>>,
+) -> Result<Json<Vec<i32>>, StatusCode> {
+    let num = payload.len() as i64;
+    tracing::Span::current().record("num_books", num);
+
+    match db::bulk_insert_books(&con, &payload).await {
+        Ok(ids) => Ok(Json(ids)),
+        Err(e) => {
+            tracing::error!(error=%e, "bulk insert failed");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
 #[tracing::instrument(skip(producer), fields(otel.kind = "Producer"))]
 async fn queue_background_ingestion_task(producer: &FutureProducer, new_id: i32) {
     // Prepare message
@@ -177,5 +194,6 @@ pub fn book_service() -> Router {
         .route("/{id}", get(get_book))
         .route("/{id}", patch(update_book))
         .route("/add", post(create_book))
+        .route("/bulk_add", post(bulk_create_books))
         .route("/{id}", delete(delete_book))
 }

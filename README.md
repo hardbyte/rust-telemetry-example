@@ -78,6 +78,8 @@ uvx \
 
 ![img.png](./.github/locust-screenshot.png)
 
+![img.png](./.github/tempo-drilldown.png)
+
 ## Migrations
 
 Migrations are run automatically by the bookapp container, or can manually be run using `sqlx-cli`:

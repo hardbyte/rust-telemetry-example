@@ -119,6 +119,33 @@ class BookTasks(TaskSet):
             else:
                 response.failure(f"Failed to create book: {response.text}")
 
+    @task(1)
+    def bulk_create_books(self):
+        # generate 5–20 random books
+        batch_size = random.randint(5, 20)
+        payload = []
+        for _ in range(batch_size):
+            payload.append({
+                "title": "Book " + ''.join(random.choices(string.ascii_letters + string.digits, k=6)),
+                "author": "Author " + ''.join(random.choices(string.ascii_letters + string.digits, k=4))
+            })
+
+        with self.client.post("/books/bulk_add",
+                              json=payload,
+                              catch_response=True) as response:
+            if response.status_code == 200:
+                try:
+                    ids = response.json()
+                    if isinstance(ids, list):
+                        self.created_book_ids.extend(ids)
+                        response.success()
+                    else:
+                        response.failure("Unexpected payload shape from bulk_add")
+                except Exception:
+                    response.failure("Failed to decode JSON response for bulk create")
+            else:
+                response.failure(f"Bulk create failed: {response.text}")
+
     @task(3)  # Weight of 3 for DELETE requests
     def delete_book(self):
         """Task to delete a previously created book."""
