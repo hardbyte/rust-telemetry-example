@@ -19,7 +19,9 @@ jobs:
     
     - name: Setup Docker Compose
       run: |
-        docker-compose --version
+        sudo apt-get update
+        sudo apt-get install -y docker-compose-plugin
+        docker compose --version
         
     - name: Check Docker Compose file
       run: |
@@ -28,18 +30,18 @@ jobs:
         
     - name: Start DB and Kafka with Docker Compose
       run: |
-        docker-compose --profile ci up -d
-        docker-compose ps
+        docker compose --profile ci up -d
+        docker compose ps
         
     - name: Wait for services to be healthy
       run: |
         # Display service status while waiting
-        docker-compose ps
+        docker compose ps
         # Wait for DB and Kafka to be healthy (30 seconds total)
         for i in {1..6}; do
           # Get health status of both services
-          DB_HEALTH=$(docker inspect --format "{{.State.Health.Status}}" $(docker-compose ps -q db))
-          KAFKA_HEALTH=$(docker inspect --format "{{.State.Health.Status}}" $(docker-compose ps -q kafka))
+          DB_HEALTH=$(docker inspect --format "{{.State.Health.Status}}" $(docker compose ps -q db))
+          KAFKA_HEALTH=$(docker inspect --format "{{.State.Health.Status}}" $(docker compose ps -q kafka))
           
           if [ "$DB_HEALTH" = "healthy" ] && [ "$KAFKA_HEALTH" = "healthy" ]; then
             echo "All services are healthy!"
@@ -51,12 +53,12 @@ jobs:
         done
         
         # Verify services are healthy
-        DB_HEALTH=$(docker inspect --format "{{.State.Health.Status}}" $(docker-compose ps -q db))
-        KAFKA_HEALTH=$(docker inspect --format "{{.State.Health.Status}}" $(docker-compose ps -q kafka))
+        DB_HEALTH=$(docker inspect --format "{{.State.Health.Status}}" $(docker compose ps -q db))
+        KAFKA_HEALTH=$(docker inspect --format "{{.State.Health.Status}}" $(docker compose ps -q kafka))
         
         if [ "$DB_HEALTH" != "healthy" ] || [ "$KAFKA_HEALTH" != "healthy" ]; then
           echo "Services did not become healthy in time"
-          docker-compose logs
+          docker compose logs
           exit 1
         fi
       
@@ -95,4 +97,4 @@ jobs:
         
     - name: Stop Docker Compose
       if: always() # Run even if the tests fail
-      run: docker-compose --profile ci down
+      run: docker compose --profile ci down
