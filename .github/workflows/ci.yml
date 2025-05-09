@@ -28,7 +28,9 @@ jobs:
 
       - name: Start DB and Kafka
         run: |
-          docker compose --profile ci up -d --wait --timeout 120
+          docker compose --profile ci up -d --wait --timeout 120 \
+          || (echo "Docker compose up --wait failed. Dumping Kafka logs:" && docker compose logs kafka && exit 1)
+          
           docker compose ps
 
       - name: Wait for services to be healthy
