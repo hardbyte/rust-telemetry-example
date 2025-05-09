@@ -19,8 +19,6 @@ jobs:
     
     - name: Setup Docker Compose
       run: |
-        sudo apt-get update
-        sudo apt-get install -y docker-compose-plugin
         docker compose --version
         
     - name: Check Docker Compose file
