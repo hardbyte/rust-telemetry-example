@@ -1,6 +1,7 @@
 services:
 
   app:
+    profiles: [default]
     build: .
     environment:
       DATABASE_URL: "postgres://postgres:password@db:5432/bookapp"
@@ -19,6 +20,7 @@ services:
         condition: service_healthy
 
   backend:
+    profiles: [default]
     build: .
     environment:
       DATABASE_URL: "postgres://postgres:password@db:5432/bookapp"
@@ -40,6 +42,7 @@ services:
 
 
   db:
+    profiles: [ci, default]
     image: postgres:17
     environment:
       POSTGRES_USER: postgres
@@ -54,6 +57,7 @@ services:
       retries: 5
 
   kafka:
+    profiles: [ci, default]
     image: bitnami/kafka:latest
     environment:
       KAFKA_BROKER_ID: 1
@@ -73,6 +77,7 @@ services:
       - "9092:9092"
 
   zookeeper:
+    profiles: [ci, default]
     image: bitnami/zookeeper:latest
     environment:
       ALLOW_ANONYMOUS_LOGIN: 'yes'
@@ -81,7 +86,8 @@ services:
 
 
   telemetry:
-    image: grafana/otel-lgtm:0.11.0
+    profiles: [default]
+    image: grafana/otel-lgtm:0.11.1
     depends_on:
       db:
         condition: service_healthy
