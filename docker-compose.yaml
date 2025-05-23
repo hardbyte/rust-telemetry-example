@@ -115,3 +115,32 @@ services:
       - ./telemetry-config/alerts:/otel-lgtm/grafana/conf/provisioning/alerting
       # Required for docker stats
       - /var/run/docker.sock:/var/run/docker.sock
+
+  integration-tester:
+    build:
+      context: .
+      target: builder # Use the builder stage from the Dockerfile
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://telemetry:4317
+      RUST_LOG: "info,integration_tests=trace,integration_tests::telemetry_test=trace" # Enable trace logs for our test crate and specific test module
+      RUST_BACKTRACE: "1"
+      # DATABASE_URL is not strictly needed by this test unless tests evolve to touch DB directly
+      # KAFKA_BROKER_URL is not strictly needed by this test
+    command: >
+      sh -c "
+      echo 'Integration tester: Waiting for services to be fully up...' &&
+      sleep 15 &&
+      echo 'Integration tester: Starting tests...' &&
+      cargo test --test telemetry_test -- --nocapture
+      "
+    depends_on:
+      app:
+        condition: service_started
+      backend:
+        condition: service_started
+      telemetry:
+        condition: service_healthy
+      db: # Added db as app and backend depend on it.
+        condition: service_healthy
+      kafka: # Added kafka as app and backend depend on it.
+        condition: service_healthy
