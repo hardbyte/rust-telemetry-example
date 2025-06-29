@@ -12,11 +12,11 @@ serde = { version = "1.0.219", features = ["derive", "rc"] }
 serde_json = { version = "1.0.140" }
 opentelemetry = { workspace = true}
 tracing-opentelemetry = { workspace = true, features=["async-trait"] }
-progenitor-client = { version = "0.9.1" }
+progenitor-client = { version = "0.11" }
 
 
 [build-dependencies]
-progenitor = {version = "0.9.1"}
+progenitor = {version = "0.11"}
 quote = "1.0.38"
 serde_yaml = { version = "0.9.34" }
 syn = { version = "2.0.98" }
