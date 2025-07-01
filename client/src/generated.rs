@@ -1,16 +1,14 @@
 #![allow(clippy::all)]
 #[allow(unused_imports)]
-use progenitor_client::{encode_path, RequestBuilderExt};
+use progenitor_client::{encode_path, ClientHooks, OperationInfo, RequestBuilderExt};
 #[allow(unused_imports)]
-pub use progenitor_client::{ByteStream, Error, ResponseValue};
-#[allow(unused_imports)]
-use reqwest::header::{HeaderMap, HeaderValue};
+pub use progenitor_client::{ByteStream, ClientInfo, Error, ResponseValue};
 /// Types used as operation parameters and responses.
 #[allow(clippy::all)]
 pub mod types {
     /// Error types.
     pub mod error {
-        /// Error from a TryFrom or FromStr implementation.
+        /// Error from a `TryFrom` or `FromStr` implementation.
         pub struct ConversionError(::std::borrow::Cow<'static, str>);
         impl ::std::error::Error for ConversionError {}
         impl ::std::fmt::Display for ConversionError {
@@ -34,7 +32,7 @@ pub mod types {
             }
         }
     }
-    ///Book
+    ///`Book`
     ///
     /// <details><summary>JSON schema</summary>
     ///
@@ -92,7 +90,7 @@ pub mod types {
             Default::default()
         }
     }
-    ///BookCreateIn
+    ///`BookCreateIn`
     ///
     /// <details><summary>JSON schema</summary>
     ///
@@ -323,26 +321,22 @@ impl Client {
             inner,
         }
     }
-    /// Get the base URL to which requests are made.
-    pub fn baseurl(&self) -> &String {
-        &self.baseurl
-    }
-    /// Get the internal `reqwest::Client` used to make requests.
-    pub fn client(&self) -> &reqwest::Client {
-        &self.client
-    }
-    /// Get the version of this API.
-    ///
-    /// This string is pulled directly from the source OpenAPI
-    /// document and may be in any format the API selects.
-    pub fn api_version(&self) -> &'static str {
+}
+impl ClientInfo<crate::ClientState> for Client {
+    fn api_version() -> &'static str {
         "1.0.0"
     }
-    /// Return a reference to the inner type stored in `self`.
-    pub fn inner(&self) -> &crate::ClientState {
+    fn baseurl(&self) -> &str {
+        self.baseurl.as_str()
+    }
+    fn client(&self) -> &reqwest::Client {
+        &self.client
+    }
+    fn inner(&self) -> &crate::ClientState {
         &self.inner
     }
 }
+impl ClientHooks<crate::ClientState> for &Client {}
 impl Client {
     /**Get all books
 
@@ -425,7 +419,8 @@ pub mod builder {
     use super::types;
     #[allow(unused_imports)]
     use super::{
-        encode_path, ByteStream, Error, HeaderMap, HeaderValue, RequestBuilderExt, ResponseValue,
+        encode_path, ByteStream, ClientHooks, ClientInfo, Error, OperationInfo, RequestBuilderExt,
+        ResponseValue,
     };
     /**Builder for [`Client::get_all_books`]
 
@@ -442,15 +437,24 @@ pub mod builder {
         pub async fn send(self) -> Result<ResponseValue<::std::vec::Vec<types::Book>>, Error<()>> {
             let Self { client } = self;
             let url = format!("{}/books/", client.baseurl,);
+            let mut header_map = ::reqwest::header::HeaderMap::with_capacity(1usize);
+            header_map.append(
+                ::reqwest::header::HeaderName::from_static("api-version"),
+                ::reqwest::header::HeaderValue::from_static(super::Client::api_version()),
+            );
             #[allow(unused_mut)]
             let mut request = client
                 .client
                 .get(url)
                 .header(
-                    reqwest::header::ACCEPT,
-                    reqwest::header::HeaderValue::from_static("application/json"),
+                    ::reqwest::header::ACCEPT,
+                    ::reqwest::header::HeaderValue::from_static("application/json"),
                 )
+                .headers(header_map)
                 .build()?;
+            let info = OperationInfo {
+                operation_id: "get_all_books",
+            };
             match (|_, request: &mut reqwest::Request| {
                 crate::inject_opentelemetry_context_into_request(request);
                 Box::pin(async { Ok::<_, Box<dyn std::error::Error>>(()) })
@@ -458,9 +462,11 @@ pub mod builder {
             .await
             {
                 Ok(_) => {}
-                Err(e) => return Err(Error::PreHookError(e.to_string())),
+                Err(e) => return Err(Error::Custom(e.to_string())),
             }
-            let result = client.client.execute(request).await;
+            client.pre(&mut request, &info).await?;
+            let result = client.exec(request, &info).await;
+            client.post(&result, &info).await?;
             let response = result?;
             match response.status().as_u16() {
                 200u16 => ResponseValue::from_response(response).await,
@@ -509,16 +515,25 @@ pub mod builder {
                 .and_then(|v| types::BookCreateIn::try_from(v).map_err(|e| e.to_string()))
                 .map_err(Error::InvalidRequest)?;
             let url = format!("{}/books/add", client.baseurl,);
+            let mut header_map = ::reqwest::header::HeaderMap::with_capacity(1usize);
+            header_map.append(
+                ::reqwest::header::HeaderName::from_static("api-version"),
+                ::reqwest::header::HeaderValue::from_static(super::Client::api_version()),
+            );
             #[allow(unused_mut)]
             let mut request = client
                 .client
                 .post(url)
                 .header(
-                    reqwest::header::ACCEPT,
-                    reqwest::header::HeaderValue::from_static("application/json"),
+                    ::reqwest::header::ACCEPT,
+                    ::reqwest::header::HeaderValue::from_static("application/json"),
                 )
                 .json(&body)
+                .headers(header_map)
                 .build()?;
+            let info = OperationInfo {
+                operation_id: "create_book",
+            };
             match (|_, request: &mut reqwest::Request| {
                 crate::inject_opentelemetry_context_into_request(request);
                 Box::pin(async { Ok::<_, Box<dyn std::error::Error>>(()) })
@@ -526,9 +541,11 @@ pub mod builder {
             .await
             {
                 Ok(_) => {}
-                Err(e) => return Err(Error::PreHookError(e.to_string())),
+                Err(e) => return Err(Error::Custom(e.to_string())),
             }
-            let result = client.client.execute(request).await;
+            client.pre(&mut request, &info).await?;
+            let result = client.exec(request, &info).await;
+            client.post(&result, &info).await?;
             let response = result?;
             match response.status().as_u16() {
                 200u16 => ResponseValue::from_response(response).await,
@@ -566,15 +583,24 @@ pub mod builder {
             let Self { client, id } = self;
             let id = id.map_err(Error::InvalidRequest)?;
             let url = format!("{}/books/{}", client.baseurl, encode_path(&id.to_string()),);
+            let mut header_map = ::reqwest::header::HeaderMap::with_capacity(1usize);
+            header_map.append(
+                ::reqwest::header::HeaderName::from_static("api-version"),
+                ::reqwest::header::HeaderValue::from_static(super::Client::api_version()),
+            );
             #[allow(unused_mut)]
             let mut request = client
                 .client
                 .get(url)
                 .header(
-                    reqwest::header::ACCEPT,
-                    reqwest::header::HeaderValue::from_static("application/json"),
+                    ::reqwest::header::ACCEPT,
+                    ::reqwest::header::HeaderValue::from_static("application/json"),
                 )
+                .headers(header_map)
                 .build()?;
+            let info = OperationInfo {
+                operation_id: "get_book",
+            };
             match (|_, request: &mut reqwest::Request| {
                 crate::inject_opentelemetry_context_into_request(request);
                 Box::pin(async { Ok::<_, Box<dyn std::error::Error>>(()) })
@@ -582,9 +608,11 @@ pub mod builder {
             .await
             {
                 Ok(_) => {}
-                Err(e) => return Err(Error::PreHookError(e.to_string())),
+                Err(e) => return Err(Error::Custom(e.to_string())),
             }
-            let result = client.client.execute(request).await;
+            client.pre(&mut request, &info).await?;
+            let result = client.exec(request, &info).await;
+            client.post(&result, &info).await?;
             let response = result?;
             match response.status().as_u16() {
                 200u16 => ResponseValue::from_response(response).await,
@@ -622,8 +650,16 @@ pub mod builder {
             let Self { client, id } = self;
             let id = id.map_err(Error::InvalidRequest)?;
             let url = format!("{}/books/{}", client.baseurl, encode_path(&id.to_string()),);
+            let mut header_map = ::reqwest::header::HeaderMap::with_capacity(1usize);
+            header_map.append(
+                ::reqwest::header::HeaderName::from_static("api-version"),
+                ::reqwest::header::HeaderValue::from_static(super::Client::api_version()),
+            );
             #[allow(unused_mut)]
-            let mut request = client.client.delete(url).build()?;
+            let mut request = client.client.delete(url).headers(header_map).build()?;
+            let info = OperationInfo {
+                operation_id: "delete_book",
+            };
             match (|_, request: &mut reqwest::Request| {
                 crate::inject_opentelemetry_context_into_request(request);
                 Box::pin(async { Ok::<_, Box<dyn std::error::Error>>(()) })
@@ -631,9 +667,11 @@ pub mod builder {
             .await
             {
                 Ok(_) => {}
-                Err(e) => return Err(Error::PreHookError(e.to_string())),
+                Err(e) => return Err(Error::Custom(e.to_string())),
             }
-            let result = client.client.execute(request).await;
+            client.pre(&mut request, &info).await?;
+            let result = client.exec(request, &info).await;
+            client.post(&result, &info).await?;
             let response = result?;
             match response.status().as_u16() {
                 200u16 => Ok(ResponseValue::empty(response)),
@@ -694,16 +732,25 @@ pub mod builder {
                 .and_then(|v| types::BookCreateIn::try_from(v).map_err(|e| e.to_string()))
                 .map_err(Error::InvalidRequest)?;
             let url = format!("{}/books/{}", client.baseurl, encode_path(&id.to_string()),);
+            let mut header_map = ::reqwest::header::HeaderMap::with_capacity(1usize);
+            header_map.append(
+                ::reqwest::header::HeaderName::from_static("api-version"),
+                ::reqwest::header::HeaderValue::from_static(super::Client::api_version()),
+            );
             #[allow(unused_mut)]
             let mut request = client
                 .client
                 .patch(url)
                 .header(
-                    reqwest::header::ACCEPT,
-                    reqwest::header::HeaderValue::from_static("application/json"),
+                    ::reqwest::header::ACCEPT,
+                    ::reqwest::header::HeaderValue::from_static("application/json"),
                 )
                 .json(&body)
+                .headers(header_map)
                 .build()?;
+            let info = OperationInfo {
+                operation_id: "update_book",
+            };
             match (|_, request: &mut reqwest::Request| {
                 crate::inject_opentelemetry_context_into_request(request);
                 Box::pin(async { Ok::<_, Box<dyn std::error::Error>>(()) })
@@ -711,9 +758,11 @@ pub mod builder {
             .await
             {
                 Ok(_) => {}
-                Err(e) => return Err(Error::PreHookError(e.to_string())),
+                Err(e) => return Err(Error::Custom(e.to_string())),
             }
-            let result = client.client.execute(request).await;
+            client.pre(&mut request, &info).await?;
+            let result = client.exec(request, &info).await;
+            client.post(&result, &info).await?;
             let response = result?;
             match response.status().as_u16() {
                 200u16 => ResponseValue::from_response(response).await,
