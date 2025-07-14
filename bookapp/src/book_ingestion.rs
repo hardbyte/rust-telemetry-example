@@ -1,6 +1,6 @@
 use anyhow::Result;
 use opentelemetry::propagation::Extractor;
-use opentelemetry::trace::{Link, Span, SpanKind, TraceContextExt, Tracer};
+use opentelemetry::trace::{Link, SpanKind, TraceContextExt};
 use opentelemetry::{global, propagation::Injector, Context as OtelContext};
 use rdkafka::message::Header;
 use rdkafka::util::Timeout;

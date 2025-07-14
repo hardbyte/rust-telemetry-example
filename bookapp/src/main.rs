@@ -16,8 +16,6 @@ use axum_tracing_opentelemetry::middleware::{OtelAxumLayer, OtelInResponseLayer}
 use rdkafka::config::ClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use tokio::signal::unix::{signal, SignalKind};
-use tower::ServiceBuilder;
-use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 
 use crate::db::init_db;
 use sqlx::PgPool;
