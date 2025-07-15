@@ -204,6 +204,26 @@ docker compose build
 docker compose up
 ```
 
+### Docker Compose Profiles
+
+The project uses Docker Compose profiles to support different deployment scenarios:
+
+- **Default profile**: Full application stack (app, backend, database, Kafka, observability)
+- **CI profile**: Minimal stack for testing (database, Kafka only)
+
+To run specific profiles:
+
+```shell
+# Run full application (default)
+docker compose up
+
+# Run only infrastructure for development
+docker compose --profile ci up
+
+# Run specific services
+docker compose up db kafka
+```
+
 
 ```http request
 ### GET all books
@@ -241,8 +261,12 @@ uvx \
 Migrations are run automatically by the bookapp container, or can manually be run using `sqlx-cli`:
 
 ```shell
+# Start database service
 docker compose up -d db
-cargo install sqlx-cli
+
+# Install sqlx-cli and run migrations
+cargo install sqlx-cli --no-default-features --features native-tls,postgres
+cd bookapp
 sqlx migrate run
 sqlx migrate add <new migration>
 ```

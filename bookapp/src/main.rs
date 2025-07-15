@@ -11,7 +11,7 @@ mod book_details;
 
 use opentelemetry::global;
 use std::sync::Arc;
-use crate::book_details::{BookDetailsProvider, RealBookDetailsProvider};
+use crate::book_details::{BookDetailsProvider, RemoteBookDetailsProvider};
 
 use tracing_subscriber;
 
@@ -37,7 +37,7 @@ fn router(connection_pool: PgPool, producer: FutureProducer) -> Router {
 
     Router::new()
         .nest_service("/books", rest::book_service())
-        .layer(Extension(Arc::new(RealBookDetailsProvider) as Arc<dyn BookDetailsProvider>))
+        .layer(Extension(Arc::new(RemoteBookDetailsProvider) as Arc<dyn BookDetailsProvider>))
         .layer(Extension(producer))
         // Our custom error injection layer can inject errors
         // This layer itself can be traced - so needs to be added before our OtelAxumLayer

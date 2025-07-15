@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use async_trait::async_trait;
 use client::Client;
 use tracing::instrument;
@@ -11,19 +10,19 @@ pub trait BookDetailsProvider: Send + Sync {
     async fn enrich_book_details(&self, books: &[Book]);
 }
 
-/// Real implementation of BookDetailsProvider that fetches data from the backend
+/// Remote implementation of BookDetailsProvider that fetches data from the backend service
 #[derive(Debug)]
-pub struct RealBookDetailsProvider;
+pub struct RemoteBookDetailsProvider;
 
 #[async_trait]
-impl BookDetailsProvider for RealBookDetailsProvider {
+impl BookDetailsProvider for RemoteBookDetailsProvider {
     #[instrument(skip(self, books), fields(num_books = books.len()))]
     async fn enrich_book_details(&self, books: &[Book]) {
         tracing::info!("Enriching book details for {} books", books.len());
         
         for book in books {
             // Call the progenitor client to get additional details
-            if let Ok(details) = self.get_book_details(book.id).await {
+            if let Ok(_details) = self.get_book_details(book.id).await {
                 tracing::debug!(
                     book_id = book.id,
                     "Successfully enriched book details"
@@ -33,7 +32,7 @@ impl BookDetailsProvider for RealBookDetailsProvider {
     }
 }
 
-impl RealBookDetailsProvider {
+impl RemoteBookDetailsProvider {
     #[instrument(fields(book_id, otel.kind = "Client"))]
     async fn get_book_details(
         &self,
