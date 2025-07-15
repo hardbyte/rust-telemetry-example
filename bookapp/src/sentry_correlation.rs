@@ -59,13 +59,13 @@ use tracing_subscriber::Layer;
 ///
 /// The layer implements the `tracing_subscriber::Layer` trait and processes events by:
 ///
-/// 1. Filtering for ERROR-level events (configurable)
+/// 1. Filtering for WARNING and ERROR-level events (configurable)
 /// 2. Extracting OpenTelemetry context from the event's span
 /// 3. Adding correlation tags to the Sentry scope
 ///
 /// # Performance Considerations
 ///
-/// - Minimal overhead: only processes ERROR-level events by default
+/// - Minimal overhead: only processes WARNING and ERROR-level events by default
 /// - Non-blocking: correlation happens synchronously but quickly
 /// - Graceful degradation: continues working even if OTel context is unavailable
 ///
@@ -92,11 +92,11 @@ pub struct SentryOtelCorrelationLayer {
 impl SentryOtelCorrelationLayer {
     /// Creates a new correlation layer with default settings.
     ///
-    /// By default, only ERROR-level events trigger correlation to minimize
-    /// performance overhead. Use `with_level()` to customize this behavior.
+    /// By default, WARNING and ERROR-level events trigger correlation.
+    /// Use `with_level()` to customize this behavior.
     pub fn new() -> Self {
         Self {
-            min_level: tracing::Level::ERROR,
+            min_level: tracing::Level::WARN,
         }
     }
 
@@ -194,9 +194,9 @@ mod tests {
     use tracing::Level;
 
     #[test]
-    fn test_new_layer_defaults_to_error_level() {
+    fn test_new_layer_defaults_to_warn_level() {
         let layer = SentryOtelCorrelationLayer::new();
-        assert_eq!(layer.min_level, Level::ERROR);
+        assert_eq!(layer.min_level, Level::WARN);
     }
 
     #[test]
@@ -208,6 +208,6 @@ mod tests {
     #[test]
     fn test_default_implementation() {
         let layer = SentryOtelCorrelationLayer::default();
-        assert_eq!(layer.min_level, Level::ERROR);
+        assert_eq!(layer.min_level, Level::WARN);
     }
 }
