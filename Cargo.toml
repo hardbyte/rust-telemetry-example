@@ -6,7 +6,7 @@ members = [
 ]
 
 [workspace.dependencies]
-axum = { version = "0.8.3" }
+axum = { version = "0.8.4" }
 tower = "0.5.2"
 reqwest = "0.12.15"
 opentelemetry = "0.30.0"
