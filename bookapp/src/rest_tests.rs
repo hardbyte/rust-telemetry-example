@@ -1,10 +1,8 @@
-use axum::{body::Body, http::{Request, StatusCode}, Extension};
-use tower::ServiceExt;
+use axum::Extension;
 use dotenv::dotenv;
 use rdkafka::producer::FutureProducer;
 use std::sync::Arc;
 use sqlx::PgPool;
-use crate::db::{self, BookStatus};
 use crate::book_ingestion;
 use crate::book_details::{BookDetailsProvider, StubBookDetailsProvider};
 use serde_json::Value;

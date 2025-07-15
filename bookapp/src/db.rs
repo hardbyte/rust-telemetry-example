@@ -1,7 +1,7 @@
 use anyhow::{Context, Ok, Result};
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
-use sqlx::{PgPool, Row, Type};
+use sqlx::{PgPool, Type};
 use tracing::{debug, info};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

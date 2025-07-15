@@ -9,18 +9,14 @@ mod tracing_config;
 mod rest_tests;
 mod book_details;
 
-use opentelemetry::global;
 use std::sync::Arc;
 use crate::book_details::{BookDetailsProvider, RemoteBookDetailsProvider};
-
-use tracing_subscriber;
 
 use anyhow::{Ok, Result};
 use axum::{Extension, Router};
 use axum_tracing_opentelemetry::middleware::{OtelAxumLayer, OtelInResponseLayer};
 use sentry_tower::NewSentryLayer;
-use rdkafka::config::ClientConfig;
-use rdkafka::producer::{FutureProducer, FutureRecord};
+use rdkafka::producer::FutureProducer;
 use tokio::signal::unix::{signal, SignalKind};
 
 use crate::db::init_db;

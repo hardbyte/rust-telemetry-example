@@ -1,16 +1,14 @@
 use std::sync::Arc;
 use crate::db::{Book, BookCreateIn, BookStatus};
-use crate::{db, reqwest_traced_client};
+use crate::{db};
 use crate::book_details::BookDetailsProvider;
-use axum::extract::{Path, Query};
+use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::routing::{delete, get, patch, post};
-use axum::{extract, http::Request, Extension, Json, Router};
-
-use opentelemetry::trace::{SpanKind, TraceContextExt};
+use axum::{Extension, Json, Router};
 use rdkafka::producer::FutureProducer;
 use sqlx::PgPool;
-use tracing::{Instrument, Level};
+use tracing::Level;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 
