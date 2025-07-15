@@ -1,217 +1,222 @@
 // In tests/src/telemetry_test.rs
-use reqwest::Client as HttpClient; // Aliased to avoid conflict
-use tracing::info_span;
+use opentelemetry::trace::{TraceContextExt, TracerProvider};
+use reqwest::Client as HttpClient;
+use serde::Deserialize;
+use std::time::Duration;
+use tracing::{info_span, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-use opentelemetry::trace::{Tracer, TraceContextExt, SpanKind, TraceId}; // Added TraceId
-use opentelemetry::global;
-use serde_json::Value; // Added for Loki response parsing
-use urlencoding; // Added for URL encoding Loki query
+use urlencoding;
 
-// Reference the init function from lib.rs
-use integration_tests::{init_test_tracing_provider, flush_traces};
+use opentelemetry_sdk::{propagation::TraceContextPropagator, trace::SdkTracerProvider};
+use opentelemetry_otlp::WithExportConfig;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::{Registry, EnvFilter};
+use tracing_opentelemetry::OpenTelemetryLayer;
 
+static INIT: std::sync::Once = std::sync::Once::new();
 
-#[tokio::test]
-async fn test_root_endpoint_generates_telemetry() {
-    println!("Initializing test tracing provider...");
-    init_test_tracing_provider(); // Initialize tracing for this test
-    println!("Test tracing provider initialized.");
+fn init_test_tracing() {
+    INIT.call_once(|| {
+        // Set up OpenTelemetry
+        opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
 
-    let tracer = global::tracer("integration-tester.rust-test");
+        let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+            .unwrap_or_else(|_| "http://telemetry:4317".to_string());
+        println!("Test OTLP Exporter Endpoint: {}", otlp_endpoint);
 
-    println!("Creating root span...");
-    let root_span = tracer.span_builder("test_request_to_root_endpoint")
-        .with_kind(SpanKind::Client)
-        .start(&tracer);
-    println!("Root span created: {:?}", root_span.context().span_id());
+        let exporter = opentelemetry_otlp::SpanExporter::builder()
+            .with_tonic()
+            .with_endpoint(otlp_endpoint)
+            .build()
+            .expect("Failed to create OTLP span exporter for tests");
 
-    let trace_id = root_span.context().trace_id().to_hex();
-    println!("Trace ID for current test: {}", trace_id);
-    
-    let cx = root_span.context();
+        let provider = SdkTracerProvider::builder()
+            .with_batch_exporter(exporter)
+            .build();
+        
+        opentelemetry::global::set_tracer_provider(provider.clone());
+        let tracer = provider.tracer("integration_test");
 
-    let http_client = HttpClient::new();
-    let mut request = http_client.get("http://app:8000/")
-        .build()
-        .expect("Failed to build request");
-
-    opentelemetry::global::get_text_map_propagator(|injector| {
-        injector.inject_context(&cx, &mut helpers::RequestCarrier::new(&mut request));
+        // Set up tracing subscriber with OpenTelemetry layer
+        let telemetry_layer = OpenTelemetryLayer::new(tracer);
+        let subscriber = Registry::default()
+            .with(EnvFilter::from_default_env())
+            .with(telemetry_layer);
+        
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("Failed to set global tracing subscriber");
+        
+        println!("Test tracing initialized");
     });
-    
-    println!("Sending request to http://app:8000/ with trace context: {:?}", request.headers().get("traceparent"));
+}
 
-    let response = http_client.execute(request).await.expect("Request failed");
-    
-    println!("Response Status: {}", response.status());
-    assert!(response.status().is_success(), "Request to / endpoint failed");
+// Response structures for parsing API responses
+#[derive(Debug, Deserialize)]
+struct LokiResponse {
+    data: LokiData,
+}
 
-    println!("Ending root span...");
-    root_span.end(); 
-    println!("Root span ended.");
+#[derive(Debug, Deserialize)]
+struct LokiData {
+    result: Vec<LokiStream>,
+}
 
-    println!("Flushing traces...");
-    flush_traces(); // Call flush
-    println!("Traces flushed. Sleeping to allow propagation...");
-    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+#[derive(Debug, Deserialize)]
+struct LokiStream {
+    values: Vec<Vec<String>>, // Each value is [timestamp, log_line]
+}
 
-    println!("Querying Tempo for trace ID: {}", trace_id);
-    let tempo_query_url = format!(
-        "http://telemetry:3000/api/datasources/proxy/tempo/api/traces/{}",
-        trace_id
-    );
-    
-    // Reuse http_client if already in scope and suitable, or create a new one
-    // let http_client = HttpClient::new(); 
-    
-    // Retry mechanism for Tempo query
-    let mut attempts = 0;
-    let max_attempts = 5;
-    let mut trace_found = false;
-    while attempts < max_attempts {
-        attempts += 1;
-        println!("Attempt {} to query Tempo: {}", attempts, tempo_query_url);
-        match http_client.get(&tempo_query_url).send().await {
-            Ok(response) => {
-                let status = response.status();
-                println!("Tempo API response status: {}", status);
-                if status == reqwest::StatusCode::OK {
-                    let response_text = response.text().await.unwrap_or_default();
-                    println!("Tempo API response body: {}", response_text);
-                    // Basic check: if OK and body is not empty or a known "not found" message.
-                    // Tempo might return an empty JSON `{{}}` or other content for a found trace.
-                    // A more robust check would be to parse the JSON and verify span details.
-                    if !response_text.is_empty() && response_text != "{}" && !response_text.to_lowercase().contains("trace not found") {
-                        trace_found = true;
-                        break;
-                    } else {
-                        println!("Trace {} not found in Tempo yet, or empty response. Body: {}", trace_id, response_text);
-                    }
-                } else if status == reqwest::StatusCode::NOT_FOUND {
-                    println!("Trace {} not found in Tempo (404).", trace_id);
-                } else {
-                    let error_body = response.text().await.unwrap_or_default();
-                    println!("Tempo API returned non-OK status: {}. Body: {}", status, error_body);
+#[derive(Debug, Deserialize)]
+struct PrometheusResponse {
+    status: String,
+    data: PrometheusData,
+}
+
+#[derive(Debug, Deserialize)]
+struct PrometheusData {
+    result: Vec<PrometheusResult>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PrometheusResult {
+    value: Vec<serde_json::Value>, // [timestamp, value_string]
+}
+
+// Helper functions for retry logic and telemetry queries
+async fn retry_with_exponential_backoff<F, T, E>(
+    operation: F,
+    max_attempts: usize,
+    base_delay_secs: u64,
+    operation_name: &str,
+) -> Result<T, String>
+where
+    F: Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, E>> + Send>>,
+    E: std::fmt::Debug,
+{
+    for attempt in 1..=max_attempts {
+        println!("Attempt {} for {}", attempt, operation_name);
+        match operation().await {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                println!("Attempt {} failed for {}: {:?}", attempt, operation_name, e);
+                if attempt < max_attempts {
+                    let delay = Duration::from_secs(attempt as u64 * base_delay_secs);
+                    println!("Waiting {:?} before next attempt...", delay);
+                    tokio::time::sleep(delay).await;
                 }
             }
-            Err(e) => {
-                println!("Error querying Tempo API: {:?}", e);
-            }
-        }
-        if attempts < max_attempts {
-            println!("Waiting before next Tempo query attempt...");
-            tokio::time::sleep(tokio::time::Duration::from_secs( (attempts * 2) as u64 )).await; // Exponential backoff
         }
     }
+    Err(format!(
+        "{} failed after {} attempts",
+        operation_name, max_attempts
+    ))
+}
 
-    assert!(trace_found, "Trace {} was not found in Tempo after {} attempts", trace_id, max_attempts);
-    println!("Successfully verified trace {} in Tempo.", trace_id);
+async fn query_tempo_for_trace(http_client: &HttpClient, trace_id: &str) -> Result<(), String> {
+    // Try direct Tempo API first, then Grafana proxy
+    let tempo_urls = vec![
+        format!("http://telemetry:3200/api/traces/{}", trace_id),
+        format!("http://telemetry:3000/api/datasources/proxy/tempo/api/traces/{}", trace_id),
+    ];
 
-    // Start of Loki query section
-    println!("Querying Loki for logs with trace ID: {}", trace_id); 
+    for attempt in 1..=10 {
+        println!("Attempt {} for Tempo trace query", attempt);
+        
+        for (i, tempo_url) in tempo_urls.iter().enumerate() {
+            println!("Trying URL {}: {}", i + 1, tempo_url);
+            
+            let response = http_client.get(tempo_url).send().await
+                .map_err(|e| format!("Request failed: {:?}", e))?;
+            
+            let status = response.status();
+            println!("Tempo API response status: {}", status);
+            
+            if status == reqwest::StatusCode::OK {
+                let response_text = response.text().await
+                    .map_err(|e| format!("Failed to read response: {:?}", e))?;
+                println!("Tempo API response body: {}", response_text);
+                
+                if !response_text.is_empty() && response_text != "{}" 
+                    && !response_text.to_lowercase().contains("trace not found") {
+                    return Ok(());
+                }
+            } else if status != reqwest::StatusCode::NOT_FOUND {
+                let error_body = response.text().await.unwrap_or_default();
+                println!("Error response from {}: {} - {}", tempo_url, status, error_body);
+            }
+        }
+        
+        if attempt < 10 {
+            let delay = Duration::from_secs(attempt as u64 * 3);
+            println!("Waiting {:?} before next attempt...", delay);
+            tokio::time::sleep(delay).await;
+        }
+    }
     
+    Err(format!("Tempo trace query failed after 10 attempts for trace {}", trace_id))
+}
+
+async fn query_loki_for_logs(http_client: &HttpClient, trace_id: &str) -> Result<(), String> {
     let now_ns = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("Time went backwards")
         .as_nanos();
-    // Query for logs in the last 5 minutes (300 seconds)
-    let start_ns = now_ns - (300 * 1_000_000_000); 
+    let start_ns = now_ns - (300 * 1_000_000_000);
 
-    let log_query = format!("{{trace_id=\\\"{}\\\"}}", trace_id); // Escaped quotes for LogQL
-
+    let log_query = format!("{{trace_id=\\\"{}\\\"}}", trace_id);
     let loki_query_url = format!(
         "http://telemetry:3000/loki/api/v1/query_range?query={}&start={}&end={}&direction=forward",
-        urlencoding::encode(&log_query), 
+        urlencoding::encode(&log_query),
         start_ns,
         now_ns
     );
 
-    println!("Loki query URL: {}", loki_query_url); 
+    println!("Loki query URL: {}", loki_query_url);
 
-    let mut attempts = 0;
-    let max_attempts_loki = 5; // Using a different variable name for clarity
-    let mut logs_found = false;
-    while attempts < max_attempts_loki {
-        attempts += 1;
-        println!("Attempt {} to query Loki: {}", attempts, loki_query_url); 
-        match http_client.get(&loki_query_url).send().await { 
-            Ok(response) => {
-                let status = response.status();
-                println!("Loki API response status: {}", status); 
-                if status == reqwest::StatusCode::OK {
-                    let response_text = response.text().await.unwrap_or_default();
-                    println!("Loki API response body (raw): {}", response_text); 
-                    
-                    match serde_json::from_str::<serde_json::Value>(&response_text) { 
-                        Ok(json_body) => {
-                            if let Some(data) = json_body.get("data") {
-                                if let Some(result) = data.get("result") {
-                                    if let Some(streams) = result.as_array() {
-                                        if !streams.is_empty() {
-                                            let mut actual_log_entries = 0;
-                                            for stream in streams {
-                                                if let Some(values) = stream.get("values") {
-                                                    if let Some(entries) = values.as_array() {
-                                                        actual_log_entries += entries.len();
-                                                    }
-                                                }
-                                            }
-                                            if actual_log_entries > 0 {
-                                                logs_found = true;
-                                                println!("Found {} log entries in Loki for trace ID {}.", actual_log_entries, trace_id); 
-                                                break; 
-                                            } else {
-                                                println!("Loki response indicates streams but no actual log entries for trace ID {}.", trace_id); 
-                                            }
-                                        } else {
-                                            println!("No log streams found in Loki for trace ID {}.", trace_id); 
-                                        }
-                                    } else {
-                                        println!("Loki response 'result' is not an array.");
-                                    }
-                                } else {
-                                    println!("Loki response missing 'result' field in 'data'.");
-                                }
-                            } else {
-                                println!("Loki response missing 'data' field.");
-                            }
-                        }
-                        Err(parse_err) => {
-                            println!("Failed to parse Loki JSON response: {:?}. Body: {}", parse_err, response_text); 
-                        }
-                    }
-                } else {
-                    let error_body = response.text().await.unwrap_or_default();
-                    println!("Loki API returned non-OK status: {}. Body: {}", status, error_body); 
-                }
-            }
-            Err(e) => {
-                println!("Error querying Loki API: {:?}", e); 
+    for attempt in 1..=10 {
+        println!("Attempt {} for Loki logs query", attempt);
+        
+        let response = http_client.get(&loki_query_url).send().await
+            .map_err(|e| format!("Request failed: {:?}", e))?;
+        
+        let status = response.status();
+        println!("Loki API response status: {}", status);
+        
+        if status == reqwest::StatusCode::OK {
+            let response_text = response.text().await
+                .map_err(|e| format!("Failed to read response: {:?}", e))?;
+            
+            let loki_response: LokiResponse = serde_json::from_str(&response_text)
+                .map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
+            
+            let log_count: usize = loki_response.data.result.iter()
+                .map(|stream| stream.values.len()).sum();
+            
+            if log_count > 0 {
+                println!("Found {} log entries in Loki for trace ID {}.", log_count, trace_id);
+                return Ok(());
             }
         }
-        if !logs_found && attempts < max_attempts_loki { // only sleep if logs not found and more attempts left
-            println!("Waiting before next Loki query attempt...");
-            tokio::time::sleep(tokio::time::Duration::from_secs( (attempts * 2) as u64 )).await; 
+        
+        if attempt < 10 {
+            let delay = Duration::from_secs(attempt as u64 * 3);
+            println!("Waiting {:?} before next attempt...", delay);
+            tokio::time::sleep(delay).await;
         }
     }
+    
+    Err(format!("Loki logs query failed after 10 attempts for trace {}", trace_id))
+}
 
-    assert!(logs_found, "Logs for trace ID {} were not found in Loki after {} attempts", trace_id, max_attempts_loki); 
-    println!("Successfully verified logs for trace ID {} in Loki.", trace_id); 
-    // End of Loki query section
-
-    // Start of Prometheus/Mimir query section
-    println!("Querying Prometheus/Mimir for metrics related to the trace ID: {}", trace_id);
-
-    // PromQL query: Check for server-side spans for the 'bookapp' service, route '/', kind SERVER.
-    // The span name for Axum routes is typically "HTTP {method} {route}".
-    // We expect a span named "HTTP GET /" for the main request.
-    // traces_spanmetrics_calls_total is a counter for calls.
+async fn query_prometheus_for_metrics(
+    http_client: &HttpClient,
+    trace_id: &str,
+) -> Result<(), String> {
     let prom_query = format!(
-        "sum(traces_spanmetrics_calls_total{{service=\"bookapp\", span_kind=\"server\", span_name=\"HTTP GET /\", trace_id=\"{}\"}}) by (span_name)",
-        trace_id 
+        "sum(traces_spanmetrics_calls_total{{service=\"bookapp\", span_kind=\"server\", span_name=\"HTTP GET /books\", trace_id=\"{}\"}}) by (span_name)",
+        trace_id
     );
-    // Alternatively, without trace_id if it's not a reliable label on metrics immediately:
-    // let prom_query = "sum(rate(traces_spanmetrics_calls_total{service=\"bookapp\", span_kind=\"server\", span_name=\"HTTP GET /\"}[1m])) > 0".to_string();
 
     let prometheus_query_url = format!(
         "http://telemetry:3000/api/datasources/proxy/prometheus/api/v1/query?query={}",
@@ -220,102 +225,139 @@ async fn test_root_endpoint_generates_telemetry() {
 
     println!("Prometheus query URL: {}", prometheus_query_url);
 
-    let mut attempts = 0;
-    let max_attempts_prometheus = 7; // Increased attempts as metrics can take longer
-    let mut metrics_found_and_valid = false;
-    while attempts < max_attempts_prometheus {
-        attempts += 1;
-        println!("Attempt {} to query Prometheus: {}", attempts, prometheus_query_url);
-        match http_client.get(&prometheus_query_url).send().await {
-            Ok(response) => {
-                let status = response.status();
-                println!("Prometheus API response status: {}", status);
-                if status == reqwest::StatusCode::OK {
-                    let response_text = response.text().await.unwrap_or_default();
-                    println!("Prometheus API response body (raw): {}", response_text);
-                    
-                    match serde_json::from_str::<serde_json::Value>(&response_text) {
-                        Ok(json_body) => {
-                            if json_body.get("status").and_then(|s| s.as_str()) == Some("success") {
-                                if let Some(data) = json_body.get("data") {
-                                    if let Some(result) = data.get("result") {
-                                        if let Some(result_array) = result.as_array() {
-                                            if !result_array.is_empty() {
-                                                // We expect one result from the sum by span_name
-                                                if let Some(metric_item) = result_array.get(0) {
-                                                    if let Some(value_array) = metric_item.get("value") {
-                                                        if value_array.len() == 2 { // [timestamp, value_str]
-                                                            if let Some(value_str) = value_array[1].as_str() {
-                                                                match value_str.parse::<f64>() {
-                                                                    Ok(val) => {
-                                                                        if val >= 1.0 { // Expect at least 1 call
-                                                                            metrics_found_and_valid = true;
-                                                                            println!("Successfully found metric {} with value {} >= 1.0", prom_query, val);
-                                                                            break;
-                                                                        } else {
-                                                                            println!("Metric value {} is < 1.0", val);
-                                                                        }
-                                                                    }
-                                                                    Err(e) => println!("Failed to parse metric value string '{}': {:?}", value_str, e),
-                                                                }
-                                                            } else {
-                                                                println!("Metric value is not a string.");
-                                                            }
-                                                        } else {
-                                                            println!("Metric value array does not have 2 elements.");
-                                                        }
-                                                    } else {
-                                                        println!("Metric item missing 'value' field.");
-                                                    }
-                                                } else {
-                                                     println!("Result array is empty, but expected one item.");
-                                                }
-                                            } else {
-                                                println!("No metrics found in Prometheus for query: {}. Result array is empty.", prom_query);
-                                            }
-                                        } else {
-                                            println!("Prometheus query result is not an array.");
-                                        }
-                                    } else {
-                                        println!("Prometheus query response missing 'result' field in 'data'.");
-                                    }
-                                } else {
-                                    println!("Prometheus query response missing 'data' field.");
-                                }
-                            } else {
-                                 println!("Prometheus query status was not 'success'. Full body: {}", response_text);
-                            }
-                        }
-                        Err(parse_err) => {
-                            println!("Failed to parse Prometheus JSON response: {:?}. Body: {}", parse_err, response_text);
+    for attempt in 1..=7 {
+        println!("Attempt {} for Prometheus metrics query", attempt);
+        
+        let response = http_client.get(&prometheus_query_url).send().await
+            .map_err(|e| format!("Request failed: {:?}", e))?;
+        
+        let status = response.status();
+        println!("Prometheus API response status: {}", status);
+        
+        if status == reqwest::StatusCode::OK {
+            let response_text = response.text().await
+                .map_err(|e| format!("Failed to read response: {:?}", e))?;
+            
+            let prom_response: PrometheusResponse = serde_json::from_str(&response_text)
+                .map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
+            
+            if prom_response.status == "success" && !prom_response.data.result.is_empty() {
+                if let Some(first_result) = prom_response.data.result.first() {
+                    if let Some(value_str) = first_result.value.get(1).and_then(|v| v.as_str()) {
+                        let val: f64 = value_str.parse()
+                            .map_err(|e| format!("Failed to parse value '{}': {:?}", value_str, e))?;
+                        
+                        if val >= 1.0 {
+                            println!("Successfully found metric with value {} >= 1.0", val);
+                            return Ok(());
                         }
                     }
-                } else {
-                    let error_body = response.text().await.unwrap_or_default();
-                    println!("Prometheus API returned non-OK status: {}. Body: {}", status, error_body);
                 }
             }
-            Err(e) => {
-                println!("Error querying Prometheus API: {:?}", e);
-            }
         }
-        if !metrics_found_and_valid && attempts < max_attempts_prometheus {
-            println!("Waiting before next Prometheus query attempt...");
-            tokio::time::sleep(tokio::time::Duration::from_secs( (attempts * 3) as u64 )).await; // Longer backoff for metrics
+        
+        if attempt < 7 {
+            let delay = Duration::from_secs(attempt as u64 * 3);
+            println!("Waiting {:?} before next attempt...", delay);
+            tokio::time::sleep(delay).await;
         }
     }
+    
+    Err(format!("Prometheus metrics query failed after 7 attempts for trace {}", trace_id))
+}
 
-    assert!(metrics_found_and_valid, "Metrics for query '{}' were not found or not valid in Prometheus after {} attempts", prom_query, max_attempts_prometheus);
-    println!("Successfully verified metrics in Prometheus for query: {}", prom_query);
-    // End of Prometheus/Mimir query section
+#[tokio::test]
+async fn test_root_endpoint_generates_telemetry() {
+    init_test_tracing();
+    
+    let (trace_id, http_client) = execute_traced_request().await;
+    wait_for_trace_propagation().await;
+    verify_telemetry_in_all_systems(&http_client, &trace_id).await;
+    
+    println!("✅ Test completed successfully!");
+}
 
-    println!("Test finished.");
+async fn execute_traced_request() -> (String, HttpClient) {
+    let root_span = info_span!("test_request_to_books_endpoint");
+    let _guard = root_span.enter();
+    
+    let trace_id = extract_trace_id(&root_span);
+    let http_client = HttpClient::new();
+    let request = build_traced_request(&http_client, &root_span).await;
+    
+    println!("📡 Sending traced request to /books endpoint (trace: {})", trace_id);
+    let response = http_client.execute(request).await.expect("Request failed");
+    
+    assert!(response.status().is_success(), "Request to /books endpoint failed with status: {}", response.status());
+    println!("✅ Request successful ({})", response.status());
+    
+    (trace_id, http_client)
+}
+
+fn extract_trace_id(span: &Span) -> String {
+    let otel_context = span.context();
+    let span_ref = otel_context.span();
+    let span_context = span_ref.span_context();
+    let trace_id = format!("{:032x}", span_context.trace_id());
+    println!("🔍 Generated trace ID: {} (length: {})", trace_id, trace_id.len());
+    trace_id
+}
+
+async fn build_traced_request(http_client: &HttpClient, span: &Span) -> reqwest::Request {
+    let mut request = http_client
+        .get("http://app:8000/books")
+        .build()
+        .expect("Failed to build request");
+    
+    let otel_context = span.context();
+    opentelemetry::global::get_text_map_propagator(|injector| {
+        injector.inject_context(&otel_context, &mut helpers::RequestCarrier::new(&mut request));
+    });
+    
+    request
+}
+
+async fn wait_for_trace_propagation() {
+    println!("⏳ Waiting for trace propagation...");
+    tokio::time::sleep(Duration::from_secs(10)).await;
+}
+
+async fn verify_telemetry_in_all_systems(http_client: &HttpClient, trace_id: &str) {
+    println!("🔎 Verifying telemetry data in all systems...");
+    
+    verify_tempo_trace(http_client, trace_id).await;
+    verify_loki_logs(http_client, trace_id).await;
+    verify_prometheus_metrics(http_client, trace_id).await;
+}
+
+async fn verify_tempo_trace(http_client: &HttpClient, trace_id: &str) {
+    println!("🎯 Querying Tempo for trace: {}", trace_id);
+    query_tempo_for_trace(http_client, trace_id)
+        .await
+        .unwrap_or_else(|e| panic!("❌ Tempo verification failed: {}", e));
+    println!("✅ Tempo verification successful");
+}
+
+async fn verify_loki_logs(http_client: &HttpClient, trace_id: &str) {
+    println!("📋 Querying Loki for logs with trace: {}", trace_id);
+    query_loki_for_logs(http_client, trace_id)
+        .await
+        .unwrap_or_else(|e| panic!("❌ Loki verification failed: {}", e));
+    println!("✅ Loki verification successful");
+}
+
+async fn verify_prometheus_metrics(http_client: &HttpClient, trace_id: &str) {
+    println!("📊 Querying Prometheus for metrics with trace: {}", trace_id);
+    query_prometheus_for_metrics(http_client, trace_id)
+        .await
+        .unwrap_or_else(|e| panic!("❌ Prometheus verification failed: {}", e));
+    println!("✅ Prometheus verification successful");
 }
 
 mod helpers {
-    use reqwest::Request;
-    use std::str::FromStr;
     use reqwest::header::{HeaderName, HeaderValue};
+    use reqwest::Request;
+    use std::{str::FromStr, collections::HashMap};
 
     pub struct RequestCarrier<'a> {
         request: &'a mut Request,
@@ -332,6 +374,22 @@ mod helpers {
             let header_name = HeaderName::from_str(key).expect("Must be header name");
             let header_value = HeaderValue::from_str(&value).expect("Must be a header value");
             self.request.headers_mut().insert(header_name, header_value);
+        }
+    }
+
+    pub struct HeaderMapCarrier<'a> {
+        headers: &'a mut HashMap<String, String>,
+    }
+
+    impl<'a> HeaderMapCarrier<'a> {
+        pub fn new(headers: &'a mut HashMap<String, String>) -> Self {
+            HeaderMapCarrier { headers }
+        }
+    }
+
+    impl<'a> opentelemetry::propagation::Injector for HeaderMapCarrier<'a> {
+        fn set(&mut self, key: &str, value: String) {
+            self.headers.insert(key.to_string(), value);
         }
     }
 }
