@@ -128,6 +128,11 @@ pub async fn update_book(connection_pool: &PgPool, book: Book) -> Result<i32> {
 
 /// Insert a whole slice of `BookCreateIn` in one go and return their new IDs.
 pub async fn bulk_insert_books(pool: &PgPool, books: &[BookCreateIn]) -> Result<Vec<i32>> {
+    // Handle empty array case
+    if books.is_empty() {
+        return Ok(Vec::new());
+    }
+
     // Build a single multi-row INSERT … RETURNING id
     let mut qb: sqlx::QueryBuilder<sqlx::Postgres> =
         sqlx::QueryBuilder::new("INSERT INTO books (title, author, status) ");
