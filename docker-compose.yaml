@@ -9,6 +9,9 @@ services:
       TRACE_SAMPLE_PROBABILITY: 1.0
       KAFKA_BROKER_URL: "kafka:9092"
       ENABLE_KAFKA_PRODUCER: "true"
+      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_ENVIRONMENT: "development"
+      SENTRY_RELEASE: "bookapp@1.0.0"
     ports:
       - "8000:8000"
       - "6669:6669"
@@ -28,6 +31,9 @@ services:
       KAFKA_BROKER_URL: "kafka:9092"
       ENABLE_KAFKA_CONSUMER: "true"
       ENABLE_KAFKA_PRODUCER: "true"
+      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_ENVIRONMENT: "development"
+      SENTRY_RELEASE: "backend@1.0.0"
     ports:
       - "8001:8000"
     depends_on:
