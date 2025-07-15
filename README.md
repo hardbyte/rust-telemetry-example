@@ -13,26 +13,31 @@ The system consists of two Rust services, a PostgreSQL database, and a Kafka mes
 ```mermaid
 graph LR
   subgraph User Input
-    locust[<fa:fa-bug> Locust]
+    direction LR
     user[<fa:fa-user> User]
+    locust[<fa:fa-bug> Locust]
   end
 
-  subgraph "Application Services"
+  subgraph Application
     app[<fa:fa-server> BookApp Service]
     backend[<fa:fa-gears> Backend Worker]
-    kafka[<fa:fa-exchange> Kafka]
-    db[<fa:fa-database> PostgreSQL]
+    db[(<fa:fa-database> PostgreSQL)]
+
+    subgraph Async Flow
+      direction TB
+      kafka[<fa:fa-exchange> Kafka]
+    end
   end
 
   user -- "POST /books/add" --> app
   locust -- "Generates Load" --> app
 
-  app -- "Writes to" --> db
-  app -- "Sends HTTP Request" --> backend
-  app -- "Produces Message" --> kafka
+  app -- "1. Writes to DB" --> db
+  app -- "2. HTTP API Call" --> backend
+  app -- "3. Produces Message" --> kafka
 
   kafka -- "Delivers Message" --> backend
-  backend -- "Reads from" --> db
+  backend -- "Processes & Reads from DB" --> db
 
   classDef services fill:#f9f,stroke:#333,stroke-width:2px;
   class app,backend,kafka,db services;
