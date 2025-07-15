@@ -6,6 +6,9 @@ use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Layer;
+use std::sync::Arc;
+use crate::sentry_correlation::SentryOtelCorrelationLayer;
+
 
 fn init_meter_provider() -> Result<SdkMeterProvider, opentelemetry_otlp::ExporterBuildError> {
     let exporter = opentelemetry_otlp::MetricExporter::builder()
@@ -40,7 +43,57 @@ fn init_logger_provider() -> Result<SdkLoggerProvider, opentelemetry_otlp::Expor
         .build())
 }
 
-pub fn init_tracing() -> (SdkTracerProvider, SdkMeterProvider, SdkLoggerProvider) {
+
+pub fn init_tracing() -> (SdkTracerProvider, SdkMeterProvider, SdkLoggerProvider, sentry::ClientInitGuard) {
+    // Initialize Sentry first - inline to avoid guard dropping
+    let sentry_dsn = std::env::var("SENTRY_DSN").unwrap_or_else(|_| {
+        tracing::warn!("SENTRY_DSN environment variable not set - Sentry integration disabled");
+        String::new()
+    });
+    
+    let service_name = std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "bookapp".to_string());
+    let environment = std::env::var("SENTRY_ENVIRONMENT").unwrap_or_else(|_| "development".to_string());
+    let release = std::env::var("SENTRY_RELEASE").unwrap_or_else(|_| format!("{}@dev", service_name));
+
+
+    let sentry_guard = if sentry_dsn.is_empty() {
+        // If no DSN provided, initialize with default (disabled) options
+        sentry::init(sentry::ClientOptions::default())
+    } else {
+        sentry::init((
+            sentry_dsn,
+            sentry::ClientOptions {
+                release: Some(release.into()),
+                environment: Some(environment.into()),
+                traces_sample_rate: 0.1, // Sample 10% of transactions for performance monitoring
+                debug: false, // Disable debug mode for production
+                before_send: Some(Arc::new(move |mut event| {
+                    // Filter out health check and metrics endpoints
+                    if let Some(request) = &event.request {
+                        if let Some(url) = &request.url {
+                            let url_str = url.as_str();
+                            if url_str.contains("/health") || url_str.contains("/metrics") {
+                                return None;
+                            }
+                        }
+                    }
+                    
+                    // Add service context - use hardcoded value to avoid lifetime issues
+                    event.tags.insert("service".to_string(), "bookapp".to_string());
+                    
+                    // Remove sensitive server information
+                    event.server_name = None;
+                    
+                    Some(event)
+                })),
+                send_default_pii: false, // Disable PII by default for security
+                ..Default::default()
+            },
+        ))
+    };
+    
+    
+    // Set up OpenTelemetry propagation
     opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
 
     // Metrics
@@ -58,7 +111,14 @@ pub fn init_tracing() -> (SdkTracerProvider, SdkMeterProvider, SdkLoggerProvider
 
     let tracer_provider = SdkTracerProvider::builder()
         .with_batch_exporter(exporter)
-        //.with_resource(opentelemetry_sdk::Resource::default())
+        .with_resource(
+            opentelemetry_sdk::Resource::builder()
+                .with_attributes(vec![opentelemetry::KeyValue::new(
+                    "service.name",
+                    "bookapp",
+                )])
+                .build(),
+        )
         .build();
 
     // Explicitly set the tracer provider globally
@@ -82,8 +142,9 @@ pub fn init_tracing() -> (SdkTracerProvider, SdkMeterProvider, SdkLoggerProvider
         .with_default(tracing::Level::INFO);
 
     // turn our OTLP pipeline into a tracing layer
+    let service_name = std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "bookapp".to_string());
     let tracing_opentelemetry_layer = tracing_opentelemetry::layer()
-        .with_tracer(tracer_provider.tracer("bookapp"))
+        .with_tracer(tracer_provider.tracer(service_name))
         .with_filter(tracing_level_filter);
 
     // Configure the stdout fmt layer
@@ -118,7 +179,20 @@ pub fn init_tracing() -> (SdkTracerProvider, SdkMeterProvider, SdkLoggerProvider
         opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&log_provider)
             .with_filter(otel_log_filter);
 
+    // Sentry tracing layer for error capture and performance monitoring
+    // Configure to capture errors and warnings with OpenTelemetry correlation
+    let sentry_layer = sentry::integrations::tracing::layer()
+        .event_filter(|md| match md.level() {
+            &tracing::Level::ERROR => sentry::integrations::tracing::EventFilter::Event,
+            &tracing::Level::WARN => sentry::integrations::tracing::EventFilter::Breadcrumb,
+            _ => sentry::integrations::tracing::EventFilter::Ignore,
+        });
+
     // Build the subscriber by combining layers
+    // IMPORTANT: Layer order matters! 
+    // 1. OpenTelemetry layer creates trace context
+    // 2. Custom correlation layer extracts OTel context for Sentry
+    // 3. Sentry layer captures events with correlation
     let subscriber = tracing_subscriber::Registry::default()
         .with(
             console_subscriber::ConsoleLayer::builder()
@@ -126,14 +200,16 @@ pub fn init_tracing() -> (SdkTracerProvider, SdkMeterProvider, SdkLoggerProvider
                 .server_addr(([0, 0, 0, 0], 6669))
                 .spawn(),
         )
+        .with(tracing_opentelemetry_layer)          // OpenTelemetry layer first to create trace context
+        .with(SentryOtelCorrelationLayer::new())    // Custom layer to add OTel context to Sentry
+        .with(sentry_layer)                         // Sentry layer captures events with correlation
         .with(otel_log_layer)
         .with(opentelemetry_metrics_layer)
-        .with(tracing_opentelemetry_layer)
         .with(stdout_layer.with_filter(tracing_subscriber::EnvFilter::from_default_env()));
 
     // Set the subscriber as the global default
     tracing::subscriber::set_global_default(subscriber).expect("Failed to set subscriber");
 
     // Return the tracer, meter and logger provider as a tuple for shutdown
-    (tracer_provider, meter_provider, log_provider)
+    (tracer_provider, meter_provider, log_provider, sentry_guard)
 }

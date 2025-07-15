@@ -343,6 +343,20 @@ pub async fn error_injection_middleware(
                     .unwrap_or("Injected Error")
                     .to_string()
             });
+
+            // Use tracing::error! for proper Sentry integration
+            // This will be automatically captured by the Sentry tracing layer
+            tracing::error!(
+                error_type = "injected_error",
+                endpoint = path.as_str(),
+                method = method.as_str(),
+                status_code = config.error_code,
+                error_rate = config.error_rate,
+                "Error injection triggered: {}",
+                body
+            );
+            
+
             return (status_code, body).into_response();
         }
     } else {

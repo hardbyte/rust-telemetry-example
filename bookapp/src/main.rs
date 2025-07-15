@@ -3,6 +3,7 @@ mod db;
 mod error_injection_middleware;
 mod reqwest_traced_client;
 mod rest;
+mod sentry_correlation;
 mod topic_management;
 mod tracing_config;
 
@@ -13,6 +14,7 @@ use tracing_subscriber;
 use anyhow::{Ok, Result};
 use axum::{Extension, Router};
 use axum_tracing_opentelemetry::middleware::{OtelAxumLayer, OtelInResponseLayer};
+use sentry_tower::NewSentryLayer;
 use rdkafka::config::ClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use tokio::signal::unix::{signal, SignalKind};
@@ -43,6 +45,8 @@ fn router(connection_pool: PgPool, producer: FutureProducer) -> Router {
             error_injection_middleware::error_injection_service(error_injection_store.clone()),
         )
         .layer(Extension(connection_pool))
+        // Sentry Tower middleware for HTTP request tracking and error capture
+        .layer(NewSentryLayer::new_from_top())
         // This layer creates a new Tracing span called "request" for each request,
         // it logs headers etc but on its own doesn't do the OTEL trace context propagation.
         // .layer(ServiceBuilder::new().layer(
@@ -77,7 +81,7 @@ async fn main() -> Result<()> {
     let enable_kafka_producer =
         std::env::var("ENABLE_KAFKA_PRODUCER").unwrap_or_else(|_| "false".to_string()) == "true";
 
-    let (trace_provider, meter_provider, log_provider) = tracing_config::init_tracing();
+    let (trace_provider, meter_provider, log_provider, sentry_guard) = tracing_config::init_tracing();
 
     // Init db
     info!("Setting up Database");
@@ -130,6 +134,10 @@ async fn main() -> Result<()> {
     trace_provider.shutdown()?;
     meter_provider.shutdown()?;
     log_provider.shutdown()?;
+    
+    // Keep Sentry guard alive until here, then let it drop naturally for clean shutdown
+    drop(sentry_guard);
 
     Ok(())
 }
+
