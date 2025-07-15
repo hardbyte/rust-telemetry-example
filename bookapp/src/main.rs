@@ -6,6 +6,7 @@ mod rest;
 mod sentry_correlation;
 mod topic_management;
 mod tracing_config;
+#[cfg(test)]
 mod rest_tests;
 mod book_details;
 
