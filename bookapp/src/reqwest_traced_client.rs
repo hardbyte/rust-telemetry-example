@@ -1,9 +1,7 @@
 use crate::db::Book;
 use reqwest::Client;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware, Extension};
-use reqwest_tracing::{ReqwestOtelSpanBackend, TracingMiddleware};
-use std::iter::Take;
-use std::slice::Iter;
+use reqwest_tracing::TracingMiddleware;
 use tracing::instrument;
 
 #[tracing::instrument(skip(books))]

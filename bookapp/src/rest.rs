@@ -1,52 +1,28 @@
+use std::sync::Arc;
 use crate::db::{Book, BookCreateIn, BookStatus};
-use crate::{db, reqwest_traced_client};
-use axum::extract::{Path, Query};
+use crate::{db};
+use crate::book_details::BookDetailsProvider;
+use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::routing::{delete, get, patch, post};
-use axum::{extract, http::Request, Extension, Json, Router};
-
-use opentelemetry::trace::{SpanKind, TraceContextExt};
+use axum::{Extension, Json, Router};
 use rdkafka::producer::FutureProducer;
 use sqlx::PgPool;
-use tracing::{Instrument, Level};
+use tracing::Level;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use client::Client;
 
-#[tracing::instrument(skip(con), fields(num_books))]
-async fn get_all_books(Extension(con): Extension<PgPool>) -> Result<Json<Vec<Book>>, StatusCode> {
+#[tracing::instrument(skip(con, details), fields(num_books))]
+async fn get_all_books(
+    Extension(con): Extension<PgPool>,
+    Extension(details): Extension<Arc<dyn BookDetailsProvider>>,
+) -> Result<Json<Vec<Book>>, StatusCode> {
     tracing::info!("Getting all books");
-
     match db::get_all_books(&con).await {
         Ok(books) => {
-            // Now let's add an attribute to the tracing span with the number of books
             tracing::Span::current().record("num_books", books.len() as i64);
-
-            // Fetch 5 book details from the backend service using reqwest-tracing client
-            let _book_details = crate::reqwest_traced_client::fetch_bulk_book_details(&books).await;
-
-            let _book_detail_res =
-                get_book_details_with_progenitor_client(books.first().unwrap().id).await;
-            let span = tracing::info_span!("tokio_spawned_requests");
-
-            let book_details_futures = books
-                .iter()
-                .take(5)
-                .map(|b: &Book| b.id)
-                .map(|id| {
-                    tokio::spawn(
-                        get_book_details_with_progenitor_client(id).instrument(span.clone()),
-                    )
-                })
-                .collect::<Vec<_>>();
-
-            let all_book_details = futures::future::join_all(book_details_futures).await;
-
-            tracing::info!(
-                num_books = all_book_details.len(),
-                "Got all book details using progenitor"
-            );
-
+            // delegate to injected provider
+            details.enrich_book_details(&books).await;
             Ok(Json(books))
         }
         Err(e) => {
@@ -56,15 +32,6 @@ async fn get_all_books(Extension(con): Extension<PgPool>) -> Result<Json<Vec<Boo
     }
 }
 
-#[tracing::instrument(fields(book_id, otel.kind = "Client"))]
-async fn get_book_details_with_progenitor_client(
-    book_id: i32,
-) -> Result<client::ResponseValue<client::types::Book>, client::Error> {
-    // Fetch a single book detail using the progenitor generated client
-    let progenitor_client = Client::new("http://backend:8000", client::ClientState::default());
-
-    progenitor_client.get_book().id(book_id).send().await
-}
 
 #[tracing::instrument(skip(con), ret(level = Level::TRACE))]
 async fn get_book(
@@ -136,11 +103,11 @@ async fn create_book(
     Extension(con): Extension<PgPool>,
     Extension(producer): Extension<FutureProducer>,
     Json(book): Json<BookCreateIn>,
-) -> Result<Json<i32>, StatusCode> {
+) -> Result<(StatusCode, Json<i32>), StatusCode> {
     let status = book.status.unwrap_or(BookStatus::Available);
     if let Ok(new_id) = db::create_book(&con, book.author, book.title, status).await {
         queue_background_ingestion_task(&producer, new_id).await;
-        Ok(Json(new_id))
+        Ok((StatusCode::CREATED, Json(new_id)))
     } else {
         Err(StatusCode::INTERNAL_SERVER_ERROR)
     }
@@ -150,12 +117,12 @@ async fn create_book(
 async fn bulk_create_books(
     Extension(con): Extension<PgPool>,
     Json(payload): Json<Vec<BookCreateIn>>,
-) -> Result<Json<Vec<i32>>, StatusCode> {
+) -> Result<(StatusCode, Json<Vec<i32>>), StatusCode> {
     let num = payload.len() as i64;
     tracing::Span::current().record("num_books", num);
 
     match db::bulk_insert_books(&con, &payload).await {
-        Ok(ids) => Ok(Json(ids)),
+        Ok(ids) => Ok((StatusCode::CREATED, Json(ids))),
         Err(e) => {
             tracing::error!(error=%e, "bulk insert failed");
             Err(StatusCode::INTERNAL_SERVER_ERROR)
@@ -197,3 +164,4 @@ pub fn book_service() -> Router {
         .route("/bulk_add", post(bulk_create_books))
         .route("/{id}", delete(delete_book))
 }
+

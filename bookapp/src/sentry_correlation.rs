@@ -47,7 +47,6 @@
 //! 5. 🎯 **Root Cause** - Identify issue with full request flow visibility
 
 use opentelemetry::trace::TraceContextExt;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::Layer;
 
 /// A tracing subscriber layer that correlates OpenTelemetry trace context with Sentry events.

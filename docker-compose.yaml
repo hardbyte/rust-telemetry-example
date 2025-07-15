@@ -1,6 +1,7 @@
 services:
 
   app:
+    profiles: [default]
     build: .
     environment:
       DATABASE_URL: "postgres://postgres:password@db:5432/bookapp"
@@ -22,6 +23,7 @@ services:
         condition: service_healthy
 
   backend:
+    profiles: [default]
     build: .
     environment:
       DATABASE_URL: "postgres://postgres:password@db:5432/bookapp"
@@ -46,6 +48,7 @@ services:
 
 
   db:
+    profiles: [ci, default]
     image: postgres:17
     environment:
       POSTGRES_USER: postgres
@@ -60,12 +63,18 @@ services:
       retries: 5
 
   kafka:
+    profiles: [ci, default]
     image: bitnami/kafka:latest
     environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_LISTENERS: PLAINTEXT://:9092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      # KRaft mode configuration (no ZooKeeper needed)
+      KAFKA_CFG_NODE_ID: 0
+      KAFKA_CFG_PROCESS_ROLES: controller,broker
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       ALLOW_PLAINTEXT_LISTENER: 'yes'
     healthcheck:
       test: ["CMD", "/opt/bitnami/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
@@ -73,21 +82,13 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
-    depends_on:
-      - zookeeper
     ports:
       - "9092:9092"
 
-  zookeeper:
-    image: bitnami/zookeeper:latest
-    environment:
-      ALLOW_ANONYMOUS_LOGIN: 'yes'
-    ports:
-      - "2181:2181"
-
 
   telemetry:
-    image: grafana/otel-lgtm:0.11.0
+    profiles: [default]
+    image: grafana/otel-lgtm:0.11.5
     depends_on:
       db:
         condition: service_healthy
@@ -100,8 +101,7 @@ services:
       GF_AUTH_ANONYMOUS_ORG_NAME: 'Main Org.'
       GF_AUTH_DISABLE_LOGIN_FORM: 'true'
       ENABLE_LOGS_PROMETHEUS: 'true'
-      # https://grafana.com/docs/grafana/latest/setup-grafana/installation/docker/#install-plugins-in-the-docker-container
-      GF_PLUGINS_PREINSTALL: 'grafana-exploretraces-app'
+      # other environment variables can be set here e.g., if otelcol is forwarding to Axiom:
       #AXIOM_API_KEY: ''
     ports:
       - "4317:4317"

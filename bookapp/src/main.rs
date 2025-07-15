@@ -6,17 +6,18 @@ mod rest;
 mod sentry_correlation;
 mod topic_management;
 mod tracing_config;
+#[cfg(test)]
+mod rest_tests;
+mod book_details;
 
-use opentelemetry::global;
-
-use tracing_subscriber;
+use std::sync::Arc;
+use crate::book_details::{BookDetailsProvider, RemoteBookDetailsProvider};
 
 use anyhow::{Ok, Result};
 use axum::{Extension, Router};
 use axum_tracing_opentelemetry::middleware::{OtelAxumLayer, OtelInResponseLayer};
 use sentry_tower::NewSentryLayer;
-use rdkafka::config::ClientConfig;
-use rdkafka::producer::{FutureProducer, FutureRecord};
+use rdkafka::producer::FutureProducer;
 use tokio::signal::unix::{signal, SignalKind};
 
 use crate::db::init_db;
@@ -33,6 +34,7 @@ fn router(connection_pool: PgPool, producer: FutureProducer) -> Router {
 
     Router::new()
         .nest_service("/books", rest::book_service())
+        .layer(Extension(Arc::new(RemoteBookDetailsProvider) as Arc<dyn BookDetailsProvider>))
         .layer(Extension(producer))
         // Our custom error injection layer can inject errors
         // This layer itself can be traced - so needs to be added before our OtelAxumLayer
@@ -116,7 +118,7 @@ async fn main() -> Result<()> {
         let listener = tokio::net::TcpListener::bind("0.0.0.0:8000").await?;
 
         info!("Starting webserver");
-        axum::serve(listener, app)
+        let server = axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 let mut signal_terminate = signal(SignalKind::terminate()).unwrap();
                 let mut signal_interrupt = signal(SignalKind::interrupt()).unwrap();
@@ -125,18 +127,30 @@ async fn main() -> Result<()> {
                     _ = signal_terminate.recv() => tracing::debug!("Received SIGTERM."),
                     _ = signal_interrupt.recv() => tracing::debug!("Received SIGINT."),
                 }
-            })
-            .await?;
+            });
+
+        tokio::select! {
+            _ = server => tracing::info!("Server has shut down gracefully."),
+            else => tracing::error!("Server encountered an error."),
+        }
     }
 
     info!("Shutting down OpenTelemetry");
 
-    trace_provider.shutdown()?;
-    meter_provider.shutdown()?;
-    log_provider.shutdown()?;
-    
+    if let Err(e) = trace_provider.shutdown() {
+        tracing::error!("Error shutting down trace provider: {:?}", e);
+    }
+    if let Err(e) = meter_provider.shutdown() {
+        tracing::error!("Error shutting down meter provider: {:?}", e);
+    }
+    if let Err(e) = log_provider.shutdown() {
+        tracing::error!("Error shutting down log provider: {:?}", e);
+    }
+
     // Keep Sentry guard alive until here, then let it drop naturally for clean shutdown
     drop(sentry_guard);
+
+    info!("Shutdown complete");
 
     Ok(())
 }

@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use axum::extract::{Path, State};
-use axum::routing::{delete, get, post, put};
+use axum::routing::{get, put};
 use axum::{extract::Request, middleware::Next, response::IntoResponse, Extension, Json, Router};
 use hyper::StatusCode;
 use matchit::Router as MatchRouter;

@@ -1,7 +1,7 @@
 use anyhow::{Context, Ok, Result};
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
-use sqlx::{PgPool, Row, Type};
+use sqlx::{PgPool, Type};
 use tracing::{debug, info};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -128,6 +128,11 @@ pub async fn update_book(connection_pool: &PgPool, book: Book) -> Result<i32> {
 
 /// Insert a whole slice of `BookCreateIn` in one go and return their new IDs.
 pub async fn bulk_insert_books(pool: &PgPool, books: &[BookCreateIn]) -> Result<Vec<i32>> {
+    // Handle empty array case
+    if books.is_empty() {
+        return Ok(Vec::new());
+    }
+
     // Build a single multi-row INSERT … RETURNING id
     let mut qb: sqlx::QueryBuilder<sqlx::Postgres> =
         sqlx::QueryBuilder::new("INSERT INTO books (title, author, status) ");
