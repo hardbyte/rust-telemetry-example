@@ -17,7 +17,7 @@ progenitor-client = { version = "0.11" }
 
 [build-dependencies]
 progenitor = {version = "0.11"}
-quote = "1.0.38"
+quote = "1.0.40"
 serde_yaml = { version = "0.9.34" }
-syn = { version = "2.0.98" }
-prettyplease = { version = "0.2.29" }
+syn = { version = "2.0.104" }
+prettyplease = { version = "0.2.35" }

@@ -77,8 +77,8 @@ jobs:
       - name: Build
         run: cargo build --verbose
 
-      - name: Run tests
-        run: cargo test --verbose
+      - name: Run tests  
+        run: cargo test --verbose --workspace --lib --bins
         env:
           DATABASE_URL: postgres://postgres:password@localhost:5432/bookapp
           KAFKA_BOOTSTRAP_SERVERS: localhost:9092
