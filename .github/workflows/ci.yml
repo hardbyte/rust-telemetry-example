@@ -1,8 +1,8 @@
-name: Rust Tests
+name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, feat/* ]
   pull_request:
     branches: [ main ]
 
@@ -11,78 +11,128 @@ env:
 
 jobs:
   test:
-    name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     env:
       DATABASE_URL: postgres://postgres:password@localhost:5432/bookapp
 
     steps:
-      - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
-      - name: Setup Docker Compose
-        run: |
-          docker compose --version
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
 
-      - name: Check Docker Compose file
-        run: |
-          echo "Using Docker Compose with profiles for CI"
-          grep -q "profiles:" docker-compose.yaml && echo "Profiles are configured in docker-compose.yaml" || echo "Warning: No profiles found in docker-compose.yaml"
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Start DB and Kafka
-        run: |
-          docker compose --profile ci up -d --wait --timeout 120 \
-          || (echo "Docker compose up --wait failed. Dumping Kafka logs:" && docker compose logs kafka && exit 1)
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+
+    - name: Run clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+    - name: Build workspace
+      run: cargo build --workspace
+
+    # Start services for both unit tests (with external access) and integration tests
+    - name: Start services for testing
+      run: |
+        echo "Starting Docker services..."
+        docker compose up -d --build
+        
+        echo "Waiting for core services (DB, Kafka) to be ready..."
+        max_attempts=20
+        attempt=0
+        while [ $attempt -lt $max_attempts ]; do
+          DB_HEALTH=$(docker inspect --format "{{.State.Health.Status}}" $(docker compose ps -q db) 2>/dev/null || echo "unhealthy")
+          KAFKA_HEALTH=$(docker inspect --format "{{.State.Health.Status}}" $(docker compose ps -q kafka) 2>/dev/null || echo "unhealthy")
           
-          docker compose ps
-
-      - name: Wait for services to be healthy
-        run: |
-          DB_HEALTH=$(docker inspect --format "{{.State.Health.Status}}" $(docker compose ps -q db))
-          KAFKA_HEALTH=$(docker inspect --format "{{.State.Health.Status}}" $(docker compose ps -q kafka))
-          
-          if [ "$DB_HEALTH" != "healthy" ] || [ "$KAFKA_HEALTH" != "healthy" ]; then
-            echo "Services did not become healthy in time."
-            echo "DB Status: $DB_HEALTH"
-            echo "Kafka Status: $KAFKA_HEALTH"
-            docker compose logs db
-            docker compose logs kafka
-            exit 1
-          else
-            echo "DB and Kafka are healthy."
+          if [ "$DB_HEALTH" = "healthy" ] && [ "$KAFKA_HEALTH" = "healthy" ]; then
+            echo "Core services (DB, Kafka) are healthy!"
+            break
           fi
-      - name: Setup environment variables
-        run: |
-          echo "DATABASE_URL=postgres://postgres:password@localhost:5432/bookapp" > .env
-          echo "KAFKA_BOOTSTRAP_SERVERS=localhost:9092" >> .env
+          echo "Waiting for core services... DB: $DB_HEALTH, Kafka: $KAFKA_HEALTH (attempt $((attempt + 1))/$max_attempts)"
+          sleep 6
+          attempt=$((attempt + 1))
+        done
+        
+        if [ $attempt -eq $max_attempts ]; then
+          echo "Core services failed to become healthy"
+          docker compose logs db
+          docker compose logs kafka
+          exit 1
+        fi
 
-      - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-          components: rustfmt, clippy
+    - name: Install SQLx CLI and run migrations
+      run: |
+        cargo install sqlx-cli --no-default-features --features native-tls,postgres
+        cd bookapp
+        sqlx database create
+        sqlx migrate run
+      env:
+        DATABASE_URL: postgres://postgres:password@localhost:5432/bookapp
 
-      - name: Install SQLx CLI
-        run: cargo install sqlx-cli --no-default-features --features native-tls,postgres
+    - name: Run unit tests
+      run: cargo test --lib --workspace --verbose
+      env:
+        DATABASE_URL: postgres://postgres:password@localhost:5432/bookapp
+        KAFKA_BOOTSTRAP_SERVERS: localhost:9092
 
-      - name: Run database migrations
-        run: |
-          cd bookapp
-          sqlx database create
-          sqlx migrate run
-        env:
-          DATABASE_URL: postgres://postgres:password@localhost:5432/bookapp
+    - name: Wait for telemetry stack readiness
+      run: |
+        echo "Waiting for telemetry stack to be ready for integration tests..."
+        max_attempts=30
+        attempt=0
+        while [ $attempt -lt $max_attempts ]; do
+          if docker compose ps telemetry | grep -q "healthy"; then
+            echo "Telemetry service is healthy!"
+            break
+          fi
+          echo "Waiting for telemetry service... (attempt $((attempt + 1))/$max_attempts)"
+          sleep 10
+          attempt=$((attempt + 1))
+        done
+        
+        if [ $attempt -eq $max_attempts ]; then
+          echo "Telemetry service failed to become healthy"
+          docker compose logs telemetry
+          exit 1
+        fi
+        
+        echo "Verifying all services are running..."
+        docker compose ps
+        
+        echo "Additional wait for trace propagation setup..."
+        sleep 30
 
-      - name: Build
-        run: cargo build --verbose
+    - name: Run integration tests
+      run: |
+        echo "Running end-to-end integration tests..."
+        docker compose run --rm integration-tester cargo test --test telemetry_test -- --nocapture
+      timeout-minutes: 15
 
-      - name: Run tests  
-        run: cargo test --verbose --workspace --lib --bins
-        env:
-          DATABASE_URL: postgres://postgres:password@localhost:5432/bookapp
-          KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+    - name: Show logs on failure
+      if: failure()
+      run: |
+        echo "=== Service Status ==="
+        docker compose ps
+        echo "=== Telemetry Logs ==="
+        docker compose logs --tail=50 telemetry
+        echo "=== App Logs ==="
+        docker compose logs --tail=20 app
+        echo "=== Backend Logs ==="
+        docker compose logs --tail=20 backend
+        echo "=== Integration Tester Logs ==="
+        docker compose logs --tail=20 integration-tester
 
-      - name: Stop Docker Compose
-        if: always() # Run even if the tests fail
-        run: docker compose --profile ci down
+    - name: Cleanup
+      if: always()
+      run: docker compose down -v
