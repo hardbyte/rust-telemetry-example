@@ -1,23 +1,23 @@
+mod book_details;
 mod book_ingestion;
 mod db;
 mod error_injection_middleware;
 mod reqwest_traced_client;
 mod rest;
+#[cfg(test)]
+mod rest_tests;
 mod sentry_correlation;
 mod topic_management;
 mod tracing_config;
-#[cfg(test)]
-mod rest_tests;
-mod book_details;
 
-use std::sync::Arc;
 use crate::book_details::{BookDetailsProvider, RemoteBookDetailsProvider};
+use std::sync::Arc;
 
 use anyhow::{Ok, Result};
 use axum::{Extension, Router};
 use axum_tracing_opentelemetry::middleware::{OtelAxumLayer, OtelInResponseLayer};
-use sentry_tower::NewSentryLayer;
 use rdkafka::producer::FutureProducer;
+use sentry_tower::NewSentryLayer;
 use tokio::signal::unix::{signal, SignalKind};
 
 use crate::db::init_db;
@@ -34,7 +34,9 @@ fn router(connection_pool: PgPool, producer: FutureProducer) -> Router {
 
     Router::new()
         .nest_service("/books", rest::book_service())
-        .layer(Extension(Arc::new(RemoteBookDetailsProvider) as Arc<dyn BookDetailsProvider>))
+        .layer(Extension(
+            Arc::new(RemoteBookDetailsProvider) as Arc<dyn BookDetailsProvider>
+        ))
         .layer(Extension(producer))
         // Our custom error injection layer can inject errors
         // This layer itself can be traced - so needs to be added before our OtelAxumLayer
@@ -83,7 +85,8 @@ async fn main() -> Result<()> {
     let enable_kafka_producer =
         std::env::var("ENABLE_KAFKA_PRODUCER").unwrap_or_else(|_| "false".to_string()) == "true";
 
-    let (trace_provider, meter_provider, log_provider, sentry_guard) = tracing_config::init_tracing();
+    let (trace_provider, meter_provider, log_provider, sentry_guard) =
+        tracing_config::init_tracing();
 
     // Init db
     info!("Setting up Database");
@@ -118,16 +121,15 @@ async fn main() -> Result<()> {
         let listener = tokio::net::TcpListener::bind("0.0.0.0:8000").await?;
 
         info!("Starting webserver");
-        let server = axum::serve(listener, app)
-            .with_graceful_shutdown(async {
-                let mut signal_terminate = signal(SignalKind::terminate()).unwrap();
-                let mut signal_interrupt = signal(SignalKind::interrupt()).unwrap();
+        let server = axum::serve(listener, app).with_graceful_shutdown(async {
+            let mut signal_terminate = signal(SignalKind::terminate()).unwrap();
+            let mut signal_interrupt = signal(SignalKind::interrupt()).unwrap();
 
-                tokio::select! {
-                    _ = signal_terminate.recv() => tracing::debug!("Received SIGTERM."),
-                    _ = signal_interrupt.recv() => tracing::debug!("Received SIGINT."),
-                }
-            });
+            tokio::select! {
+                _ = signal_terminate.recv() => tracing::debug!("Received SIGTERM."),
+                _ = signal_interrupt.recv() => tracing::debug!("Received SIGINT."),
+            }
+        });
 
         tokio::select! {
             _ = server => tracing::info!("Server has shut down gracefully."),
@@ -154,4 +156,3 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
-
