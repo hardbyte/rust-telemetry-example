@@ -107,6 +107,7 @@ services:
       - "4317:4317"
       - "4318:4318"
       - "3000:3000"
+      - "3200:3200"
     volumes:
       - ./telemetry-config/tempo-config.yaml:/otel-lgtm/tempo-config.yaml
       - ./telemetry-config/otelcon-config.yaml:/otel-lgtm/otelcol-config.yaml

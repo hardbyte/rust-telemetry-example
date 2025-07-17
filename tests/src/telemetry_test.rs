@@ -82,6 +82,58 @@ struct PrometheusResult {
     value: Vec<serde_json::Value>, // [timestamp, value_string]
 }
 
+#[derive(Debug, Deserialize)]
+struct TempoResponse {
+    #[serde(rename = "resourceSpans")]
+    resource_spans: Vec<ResourceSpan>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResourceSpan {
+    resource: Resource,
+    #[serde(rename = "scopeSpans")]
+    scope_spans: Vec<ScopeSpan>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Resource {
+    attributes: Vec<KeyValue>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ScopeSpan {
+    spans: Vec<Span>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Span {
+    #[serde(rename = "traceId")]
+    trace_id: String,
+    name: String,
+    kind: String,
+    attributes: Vec<KeyValue>,
+    status: Status,
+}
+
+#[derive(Debug, Deserialize)]
+struct KeyValue {
+    key: String,
+    value: Value,
+}
+
+#[derive(Debug, Deserialize)]
+struct Value {
+    #[serde(rename = "stringValue")]
+    string_value: Option<String>,
+    #[serde(rename = "intValue")]
+    int_value: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Status {
+    code: String,
+}
+
 // Test configuration and state
 struct TestConfig {
     app_url: String,
@@ -90,17 +142,54 @@ struct TestConfig {
     books_endpoint: String,
     trace_propagation_wait: Duration,
     log_lookback_duration: Duration,
+    prometheus_datasource_id: String,
+    tempo_datasource_id: String,
+    loki_datasource_id: String,
+    expected_service_name: String,
+    expected_span_name: String,
+    prometheus_query: String,
 }
 
 impl Default for TestConfig {
     fn default() -> Self {
+        let expected_service_name =
+            std::env::var("EXPECTED_SERVICE_NAME").unwrap_or_else(|_| EXPECTED_SERVICE_NAME.to_string());
+        let expected_span_name =
+            std::env::var("EXPECTED_SPAN_NAME").unwrap_or_else(|_| EXPECTED_SPAN_NAME.to_string());
+
         Self {
-            app_url: APP_BASE_URL.to_string(),
-            telemetry_url: TELEMETRY_BASE_URL.to_string(),
-            tempo_url: TEMPO_DIRECT_URL.to_string(),
-            books_endpoint: BOOKS_ENDPOINT.to_string(),
-            trace_propagation_wait: Duration::from_secs(TRACE_PROPAGATION_WAIT_SECS),
-            log_lookback_duration: Duration::from_secs(LOG_LOOKBACK_SECS),
+            app_url: std::env::var("APP_BASE_URL").unwrap_or_else(|_| APP_BASE_URL.to_string()),
+            telemetry_url: std::env::var("TELEMETRY_BASE_URL")
+                .unwrap_or_else(|_| TELEMETRY_BASE_URL.to_string()),
+            tempo_url: std::env::var("TEMPO_DIRECT_URL")
+                .unwrap_or_else(|_| TEMPO_DIRECT_URL.to_string()),
+            books_endpoint: std::env::var("BOOKS_ENDPOINT")
+                .unwrap_or_else(|_| BOOKS_ENDPOINT.to_string()),
+            trace_propagation_wait: Duration::from_secs(
+                std::env::var("TRACE_PROPAGATION_WAIT_SECS")
+                    .unwrap_or_else(|_| TRACE_PROPAGATION_WAIT_SECS.to_string())
+                    .parse()
+                    .unwrap_or(TRACE_PROPAGATION_WAIT_SECS),
+            ),
+            log_lookback_duration: Duration::from_secs(
+                std::env::var("LOG_LOOKBACK_SECS")
+                    .unwrap_or_else(|_| LOG_LOOKBACK_SECS.to_string())
+                    .parse()
+                    .unwrap_or(LOG_LOOKBACK_SECS),
+            ),
+            prometheus_datasource_id: std::env::var("PROMETHEUS_DATASOURCE_ID")
+                .unwrap_or_else(|_| "1".to_string()),
+            tempo_datasource_id: std::env::var("TEMPO_DATASOURCE_ID")
+                .unwrap_or_else(|_| "2".to_string()),
+            loki_datasource_id: std::env::var("LOKI_DATASOURCE_ID").unwrap_or_else(|_| "3".to_string()),
+            expected_service_name: expected_service_name.clone(),
+            expected_span_name: expected_span_name.clone(),
+            prometheus_query: std::env::var("PROMETHEUS_QUERY").unwrap_or_else(|_| {
+                format!(
+                    "sum(traces_spanmetrics_calls_total{{service=\"{}\", span_kind=\"server\", span_name=\"{}\", trace_id=\"{{trace_id}}\"}})! by (span_name)",
+                    expected_service_name, expected_span_name
+                )
+            }),
         }
     }
 }
@@ -168,12 +257,12 @@ async fn query_tempo_for_trace(
 ) -> TestResult<()> {
     validate_trace_id(trace_id)?;
 
-    // Try direct Tempo API first, then Grafana proxy (using correct datasource ID 2)
+    // Try direct Tempo API first, then Grafana proxy
     let tempo_urls = [
         format!("{}/api/traces/{}", config.tempo_url, trace_id),
         format!(
-            "{}/api/datasources/proxy/2/api/traces/{}",
-            config.telemetry_url, trace_id
+            "{}/api/datasources/proxy/{}/api/traces/{}",
+            config.telemetry_url, config.tempo_datasource_id, trace_id
         ),
     ];
 
@@ -191,19 +280,36 @@ async fn query_tempo_for_trace(
                     if status == reqwest::StatusCode::OK {
                         match response.text().await {
                             Ok(response_text) => {
-                                println!(
-                                    "Tempo API response body (length: {})",
-                                    response_text.len()
-                                );
-
-                                if !response_text.is_empty()
-                                    && response_text != "{}"
-                                    && !response_text.to_lowercase().contains("trace not found")
+                                if let Ok(tempo_response) =
+                                    serde_json::from_str::<TempoResponse>(&response_text)
                                 {
-                                    return Ok(());
+                                    if let Some(resource_span) =
+                                        tempo_response.resource_spans.iter().find(|rs| {
+                                            rs.resource.attributes.iter().any(|kv| {
+                                                kv.key == "service.name"
+                                                    && kv.value.string_value
+                                                        == Some(config.expected_service_name.clone())
+                                            })
+                                        })
+                                    {
+                                        if let Some(scope_span) = resource_span.scope_spans.first()
+                                        {
+                                            if scope_span.spans.iter().any(|s| {
+                                                s.name == config.expected_span_name
+                                                    && s.kind == "SPAN_KIND_SERVER"
+                                            }) {
+                                                println!("Found expected span in trace.");
+                                                return Ok(());
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    println!("Failed to parse Tempo JSON response: {}", response_text);
                                 }
                             }
-                            Err(e) => println!("Failed to read response: {:?}", e),
+                            Err(e) => {
+                                println!("Failed to read response text: {:?}", e);
+                            }
                         }
                     } else if status != reqwest::StatusCode::NOT_FOUND {
                         let error_body = response.text().await.unwrap_or_default();
@@ -248,8 +354,9 @@ async fn query_loki_for_logs(
 
     let log_query = format!("{{trace_id=\"{}\"}}!", trace_id);
     let loki_query_url = format!(
-        "{}/api/datasources/proxy/3/loki/api/v1/query_range?query={}&start={}&end={}&direction=forward",
+        "{}/api/datasources/proxy/{}/loki/api/v1/query_range?query={}&start={}&end={}&direction=forward",
         config.telemetry_url,
+        config.loki_datasource_id,
         urlencoding::encode(&log_query),
         start_ns,
         now_ns
@@ -318,14 +425,12 @@ async fn query_prometheus_for_metrics(
 ) -> TestResult<()> {
     validate_trace_id(trace_id)?;
 
-    let prom_query = format!(
-        "sum(traces_spanmetrics_calls_total{{service=\"{}\", span_kind=\"server\", span_name=\"{}\", trace_id=\"{}\"}})! by (span_name)",
-        EXPECTED_SERVICE_NAME, EXPECTED_SPAN_NAME, trace_id
-    );
+    let prom_query = config.prometheus_query.replace("{trace_id}", trace_id);
 
     let prometheus_query_url = format!(
-        "{}/api/datasources/proxy/1/api/v1/query?query={}",
+        "{}/api/datasources/proxy/{}/api/v1/query?query={}",
         config.telemetry_url,
+        config.prometheus_datasource_id,
         urlencoding::encode(&prom_query)
     );
 
@@ -414,6 +519,143 @@ async fn test_root_endpoint_generates_telemetry() -> TestResult<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn test_error_endpoint_generates_error_trace() -> TestResult<()> {
+    let config = TestConfig::default();
+    init_test_tracing()?;
+
+    let http_client = HttpClient::new();
+
+    // Configure error injection
+    let error_injection_config = serde_json::json!({
+        "endpoint_pattern": "/books/1",
+        "http_method": "GET",
+        "error_rate": 1.0,
+        "error_code": 500,
+        "error_message": "Injected Internal Server Error"
+    });
+
+    let response = http_client
+        .post(format!("{}/error-injection", config.app_url))
+        .json(&error_injection_config)
+        .send()
+        .await
+        .map_err(|e| TestError::new("error_injection_setup", e.to_string()))?;
+
+    if !response.status().is_success() {
+        return Err(TestError::new(
+            "error_injection_setup",
+            format!(
+                "Failed to configure error injection: {}",
+                response.status()
+            ),
+        ));
+    }
+
+    // Make a request that should fail
+    let response = http_client
+        .get(format!("{}/books/1", config.app_url))
+        .send()
+        .await
+        .map_err(|e| TestError::new("http_request_error_case", e.to_string()))?;
+
+    assert_eq!(response.status(), reqwest::StatusCode::INTERNAL_SERVER_ERROR);
+
+    let trace_id = if let Some(traceparent) = response.headers().get("traceparent") {
+        if let Ok(traceparent_str) = traceparent.to_str() {
+            let parts: Vec<&str> = traceparent_str.split('-').collect();
+            if parts.len() >= 2 {
+                parts[1].to_string()
+            } else {
+                return Err(TestError::new(
+                    "trace_extraction_error_case",
+                    format!("Invalid traceparent format: {}", traceparent_str),
+                ));
+            }
+        } else {
+            return Err(TestError::new(
+                "trace_extraction_error_case",
+                "Failed to parse traceparent header as string".to_string(),
+            ));
+        }
+    } else {
+        return Err(TestError::new(
+            "trace_extraction_error_case",
+            "No traceparent header found in response".to_string(),
+        ));
+    };
+
+    wait_for_trace_propagation(&config).await;
+
+    // Verify that the trace exists in Tempo and has an error status
+    query_tempo_for_trace_with_error_status(&http_client, &trace_id, &config).await?;
+
+    println!("✅ Error telemetry test completed successfully!");
+    Ok(())
+}
+
+async fn query_tempo_for_trace_with_error_status(
+    http_client: &HttpClient,
+    trace_id: &str,
+    config: &TestConfig,
+) -> TestResult<()> {
+    validate_trace_id(trace_id)?;
+
+    let tempo_urls = [
+        format!("{}/api/traces/{}", config.tempo_url, trace_id),
+        format!(
+            "{}/api/datasources/proxy/{}/api/traces/{}",
+            config.telemetry_url, config.tempo_datasource_id, trace_id
+        ),
+    ];
+
+    for attempt in 1..=MAX_TEMPO_ATTEMPTS {
+        for tempo_url in &tempo_urls {
+            if let Ok(response) = http_client.get(tempo_url).send().await {
+                if response.status() == reqwest::StatusCode::OK {
+                    if let Ok(response_text) = response.text().await {
+                        if let Ok(tempo_response) =
+                            serde_json::from_str::<TempoResponse>(&response_text)
+                        {
+                            if let Some(resource_span) =
+                                tempo_response.resource_spans.iter().find(|rs| {
+                                    rs.resource.attributes.iter().any(|kv| {
+                                        kv.key == "service.name"
+                                            && kv.value.string_value
+                                                == Some(config.expected_service_name.clone())
+                                    })
+                                })
+                            {
+                                if let Some(scope_span) = resource_span.scope_spans.first() {
+                                    if scope_span
+                                        .spans
+                                        .iter()
+                                        .any(|s| s.status.code == "STATUS_CODE_ERROR")
+                                    {
+                                        println!("Found trace with error status.");
+                                        return Ok(());
+                                    }
+                                }
+                            }
+                        } else {
+                            println!("Failed to parse Tempo JSON response: {}", response_text);
+                        }
+                    }
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(attempt as u64 * BASE_RETRY_DELAY_SECS)).await;
+    }
+
+    Err(TestError::new(
+        "tempo_error_query",
+        format!(
+            "Failed to find trace with error status for trace ID {}",
+            trace_id
+        ),
+    ))
+}
+
 async fn execute_traced_request(config: &TestConfig) -> TestResult<(String, HttpClient)> {
     let http_client = HttpClient::new();
     let endpoint_url = format!("{}{}", config.app_url, config.books_endpoint);
@@ -437,7 +679,10 @@ async fn execute_traced_request(config: &TestConfig) -> TestResult<(String, Http
         ));
     }
 
-    // Extract trace ID from the traceparent header
+    // Extract trace ID from the traceparent header.
+    // This is a critical part of the test, as it verifies that the trace context
+    // is being correctly propagated from the service. If this header is missing,
+    // it indicates a fundamental problem with the telemetry setup.
     let trace_id = if let Some(traceparent) = response.headers().get("traceparent") {
         if let Ok(traceparent_str) = traceparent.to_str() {
             // traceparent format: 00-{trace_id}-{span_id}-{flags}
@@ -493,8 +738,14 @@ async fn verify_telemetry_in_all_systems(
     // Tempo verification (required)
     verify_tempo_trace(http_client, trace_id, config).await?;
 
+    // Run Loki and Prometheus verifications in parallel
+    let (loki_result, prometheus_result) = tokio::join!(
+        verify_loki_logs(http_client, trace_id, config),
+        verify_prometheus_metrics(http_client, trace_id, config)
+    );
+
     // Loki verification (optional - logs may not have trace correlation yet)
-    match verify_loki_logs(http_client, trace_id, config).await {
+    match loki_result {
         Ok(()) => println!("✅ Loki verification successful"),
         Err(e) => println!(
             "⚠️  Loki verification failed (trace correlation may not be configured): {}",
@@ -503,7 +754,7 @@ async fn verify_telemetry_in_all_systems(
     }
 
     // Prometheus verification (optional - metrics may need more time)
-    match verify_prometheus_metrics(http_client, trace_id, config).await {
+    match prometheus_result {
         Ok(()) => println!("✅ Prometheus verification successful"),
         Err(e) => println!(
             "⚠️  Prometheus verification failed (metrics may need more time): {}",
