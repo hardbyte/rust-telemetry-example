@@ -322,7 +322,7 @@ pub async fn error_injection_middleware(
 
     // Query the store for matching error injection configurations
     if let Some(config) = get_matching_error_injection_config(store, &path, &method).await {
-        tracing::Span::current().record("error_rate", &config.error_rate);
+        tracing::Span::current().record("error_rate", config.error_rate);
 
         // Generate a random number between 0.0 and 1.0
         let mut rng = rand::rng();

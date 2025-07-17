@@ -5,7 +5,7 @@ use reqwest_tracing::TracingMiddleware;
 use tracing::instrument;
 
 #[tracing::instrument(skip(books))]
-pub(crate) async fn fetch_bulk_book_details(books: &Vec<Book>) -> Vec<String> {
+pub(crate) async fn fetch_bulk_book_details(books: &[Book]) -> Vec<String> {
     let reqwest_client = Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
@@ -28,17 +28,17 @@ pub(crate) async fn fetch_bulk_book_details(books: &Vec<Book>) -> Vec<String> {
     // Run each query to backend sequentially (should propagate context):
     let mut seq_book_details = Vec::new();
 
-    fetch_some_books_sequentially(&http_client, &mut seq_book_details, &books).await;
+    fetch_some_books_sequentially(&http_client, &mut seq_book_details, books).await;
 
     // Run queries to backend in parallel:
-    fetch_some_books_in_parallel(http_client, &books).await;
+    fetch_some_books_in_parallel(http_client, books).await;
 
     seq_book_details
 }
 
 #[instrument(skip_all)]
-async fn fetch_some_books_in_parallel(http_client: ClientWithMiddleware, some_books: &Vec<Book>) {
-    let futures = some_books.into_iter().take(5).map(|book| {
+async fn fetch_some_books_in_parallel(http_client: ClientWithMiddleware, some_books: &[Book]) {
+    let futures = some_books.iter().take(5).map(|book| {
         let http_client = http_client.clone();
         async move {
             tracing::debug!(id = book.id, "Getting one book from backend");
@@ -59,9 +59,9 @@ async fn fetch_some_books_in_parallel(http_client: ClientWithMiddleware, some_bo
 async fn fetch_some_books_sequentially(
     http_client: &ClientWithMiddleware,
     seq_book_details: &mut Vec<String>,
-    some_books: &Vec<Book>,
+    some_books: &[Book],
 ) {
-    for book in some_books.into_iter().take(5) {
+    for book in some_books.iter().take(5) {
         let r = http_client
             .get(format!("http://backend:8000/books/{}", book.id))
             .send()

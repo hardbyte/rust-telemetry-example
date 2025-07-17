@@ -61,7 +61,7 @@ fn router(connection_pool: PgPool, producer: FutureProducer) -> Router {
         //
         // ))
         // include trace context as header into the response
-        .layer(OtelInResponseLayer::default())
+        .layer(OtelInResponseLayer)
         // start OpenTelemetry trace on incoming request
         // as long as not filtered out!
         .layer(OtelAxumLayer::default())

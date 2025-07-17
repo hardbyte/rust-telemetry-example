@@ -53,7 +53,7 @@ struct HeaderExtractor<'a> {
     headers: Option<&'a rdkafka::message::BorrowedHeaders>,
 }
 
-impl<'a> Extractor for HeaderExtractor<'a> {
+impl Extractor for HeaderExtractor<'_> {
     fn get(&self, key: &str) -> Option<&str> {
         self.headers.and_then(|headers| {
             headers.iter().find_map(|header| {
