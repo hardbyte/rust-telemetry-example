@@ -1,7 +1,7 @@
+use crate::db::Book;
 use async_trait::async_trait;
 use client::Client;
 use tracing::instrument;
-use crate::db::Book;
 
 /// A trait for providing detailed book information from external sources
 #[async_trait]
@@ -19,14 +19,11 @@ impl BookDetailsProvider for RemoteBookDetailsProvider {
     #[instrument(skip(self, books), fields(num_books = books.len()))]
     async fn enrich_book_details(&self, books: &[Book]) {
         tracing::info!("Enriching book details for {} books", books.len());
-        
+
         for book in books {
             // Call the progenitor client to get additional details
             if let Ok(_details) = self.get_book_details(book.id).await {
-                tracing::debug!(
-                    book_id = book.id,
-                    "Successfully enriched book details"
-                );
+                tracing::debug!(book_id = book.id, "Successfully enriched book details");
             }
         }
     }

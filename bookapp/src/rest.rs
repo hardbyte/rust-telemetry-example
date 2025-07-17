@@ -1,16 +1,15 @@
-use std::sync::Arc;
-use crate::db::{Book, BookCreateIn, BookStatus};
-use crate::{db};
 use crate::book_details::BookDetailsProvider;
+use crate::db;
+use crate::db::{Book, BookCreateIn, BookStatus};
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::routing::{delete, get, patch, post};
 use axum::{Extension, Json, Router};
 use rdkafka::producer::FutureProducer;
 use sqlx::PgPool;
+use std::sync::Arc;
 use tracing::Level;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-
 
 #[tracing::instrument(skip(con, details), fields(num_books))]
 async fn get_all_books(
@@ -31,7 +30,6 @@ async fn get_all_books(
         }
     }
 }
-
 
 #[tracing::instrument(skip(con), ret(level = Level::TRACE))]
 async fn get_book(
@@ -164,4 +162,3 @@ pub fn book_service() -> Router {
         .route("/bulk_add", post(bulk_create_books))
         .route("/{id}", delete(delete_book))
 }
-

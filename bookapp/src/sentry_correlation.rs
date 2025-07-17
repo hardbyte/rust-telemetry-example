@@ -138,7 +138,10 @@ impl SentryOtelCorrelationLayer {
         // Try to get OpenTelemetry context from the event's span
         if let Some(span_ref) = ctx.event_span(event) {
             // Get OpenTelemetry extensions from the span
-            if let Some(otel_data) = span_ref.extensions().get::<tracing_opentelemetry::OtelData>() {
+            if let Some(otel_data) = span_ref
+                .extensions()
+                .get::<tracing_opentelemetry::OtelData>()
+            {
                 let parent_cx = &otel_data.parent_cx;
                 let span_ref = parent_cx.span();
                 let span_context = span_ref.span_context();

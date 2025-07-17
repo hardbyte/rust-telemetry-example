@@ -355,7 +355,6 @@ pub async fn error_injection_middleware(
                 "Error injection triggered: {}",
                 body
             );
-            
 
             return (status_code, body).into_response();
         }
