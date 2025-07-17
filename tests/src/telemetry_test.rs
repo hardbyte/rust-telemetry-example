@@ -108,9 +108,11 @@ struct ScopeSpan {
 #[derive(Debug, Deserialize)]
 struct Span {
     #[serde(rename = "traceId")]
+    #[allow(dead_code)]
     trace_id: String,
     name: String,
     kind: String,
+    #[allow(dead_code)]
     attributes: Vec<KeyValue>,
     status: Status,
 }
@@ -126,6 +128,7 @@ struct Value {
     #[serde(rename = "stringValue")]
     string_value: Option<String>,
     #[serde(rename = "intValue")]
+    #[allow(dead_code)]
     int_value: Option<String>,
 }
 
