@@ -186,11 +186,12 @@ pub fn init_tracing() -> (
 
     // Sentry tracing layer for error capture and performance monitoring
     // Configure to capture errors and warnings with OpenTelemetry correlation
-    let sentry_layer = sentry::integrations::tracing::layer().event_filter(|md| match *md.level() {
-        tracing::Level::ERROR => sentry::integrations::tracing::EventFilter::Event,
-        tracing::Level::WARN => sentry::integrations::tracing::EventFilter::Breadcrumb,
-        _ => sentry::integrations::tracing::EventFilter::Ignore,
-    });
+    let sentry_layer =
+        sentry::integrations::tracing::layer().event_filter(|md| match *md.level() {
+            tracing::Level::ERROR => sentry::integrations::tracing::EventFilter::Event,
+            tracing::Level::WARN => sentry::integrations::tracing::EventFilter::Breadcrumb,
+            _ => sentry::integrations::tracing::EventFilter::Ignore,
+        });
 
     // Build the subscriber by combining layers
     // IMPORTANT: Layer order matters!
