@@ -152,8 +152,8 @@ struct TestConfig {
 
 impl Default for TestConfig {
     fn default() -> Self {
-        let expected_service_name =
-            std::env::var("EXPECTED_SERVICE_NAME").unwrap_or_else(|_| EXPECTED_SERVICE_NAME.to_string());
+        let expected_service_name = std::env::var("EXPECTED_SERVICE_NAME")
+            .unwrap_or_else(|_| EXPECTED_SERVICE_NAME.to_string());
         let expected_span_name =
             std::env::var("EXPECTED_SPAN_NAME").unwrap_or_else(|_| EXPECTED_SPAN_NAME.to_string());
 
@@ -288,7 +288,9 @@ async fn query_tempo_for_trace(
                                             rs.resource.attributes.iter().any(|kv| {
                                                 kv.key == "service.name"
                                                     && kv.value.string_value
-                                                        == Some(config.expected_service_name.clone())
+                                                        == Some(
+                                                            config.expected_service_name.clone(),
+                                                        )
                                             })
                                         })
                                     {
@@ -304,7 +306,10 @@ async fn query_tempo_for_trace(
                                         }
                                     }
                                 } else {
-                                    println!("Failed to parse Tempo JSON response: {}", response_text);
+                                    println!(
+                                        "Failed to parse Tempo JSON response: {}",
+                                        response_text
+                                    );
                                 }
                             }
                             Err(e) => {
@@ -545,10 +550,7 @@ async fn test_error_endpoint_generates_error_trace() -> TestResult<()> {
     if !response.status().is_success() {
         return Err(TestError::new(
             "error_injection_setup",
-            format!(
-                "Failed to configure error injection: {}",
-                response.status()
-            ),
+            format!("Failed to configure error injection: {}", response.status()),
         ));
     }
 
@@ -559,7 +561,10 @@ async fn test_error_endpoint_generates_error_trace() -> TestResult<()> {
         .await
         .map_err(|e| TestError::new("http_request_error_case", e.to_string()))?;
 
-    assert_eq!(response.status(), reqwest::StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::INTERNAL_SERVER_ERROR
+    );
 
     let trace_id = if let Some(traceparent) = response.headers().get("traceparent") {
         if let Ok(traceparent_str) = traceparent.to_str() {

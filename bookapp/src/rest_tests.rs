@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    
+
     use crate::book_details::{BookDetailsProvider, StubBookDetailsProvider};
     use crate::db::BookStatus;
     use crate::{book_ingestion, db};
