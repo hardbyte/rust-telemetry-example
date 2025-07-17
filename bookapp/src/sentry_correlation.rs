@@ -133,8 +133,8 @@ impl SentryOtelCorrelationLayer {
 
                     // Add OpenTelemetry context to Sentry scope for cross-platform correlation
                     sentry::configure_scope(|scope| {
-                        scope.set_tag("otel.trace_id", format!("{:032x}", trace_id));
-                        scope.set_tag("otel.span_id", format!("{:016x}", span_id));
+                        scope.set_tag("otel.trace_id", format!("{trace_id:032x}"));
+                        scope.set_tag("otel.span_id", format!("{span_id:016x}"));
                     });
                 }
             }

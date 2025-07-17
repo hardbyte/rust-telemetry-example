@@ -30,7 +30,7 @@ fn main() {
         .expect("Could not generate tokens");
     let ast = syn::parse2(tokens).unwrap();
     let content = prettyplease::unparse(&ast);
-    let content = format!("#![allow(clippy::all)]\n{}", content);
+    let content = format!("#![allow(clippy::all)]\n{content}");
 
     let mut out_file = std::path::Path::new("src").to_path_buf();
     out_file.push("generated.rs");

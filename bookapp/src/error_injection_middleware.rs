@@ -356,6 +356,28 @@ pub async fn error_injection_middleware(
                 body
             );
 
+            // Test Sentry structured logging capabilities
+            // This demonstrates the enhanced log capture with filtering
+            sentry::with_scope(
+                |scope| {
+                    scope.set_tag("error_type", "injected_error");
+                    scope.set_tag("endpoint", &path);
+                    scope.set_tag("method", &method);
+                    scope.set_extra("status_code", config.error_code.into());
+                    scope.set_extra("error_rate", config.error_rate.into());
+                },
+                || {
+                    // Use structured logging with Sentry capture
+                    tracing::info!(
+                        injected_error = true,
+                        endpoint = %path,
+                        method = %method,
+                        status = config.error_code,
+                        "Testing Sentry structured log capture"
+                    );
+                },
+            );
+
             return (status_code, body).into_response();
         }
     } else {

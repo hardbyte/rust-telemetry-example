@@ -58,7 +58,7 @@ pub fn init_tracing() -> (
     let environment =
         std::env::var("SENTRY_ENVIRONMENT").unwrap_or_else(|_| "development".to_string());
     let release =
-        std::env::var("SENTRY_RELEASE").unwrap_or_else(|_| format!("{}@dev", service_name));
+        std::env::var("SENTRY_RELEASE").unwrap_or_else(|_| format!("{service_name}@dev"));
 
     let sentry_guard = if sentry_dsn.is_empty() {
         // If no DSN provided, initialize with default (disabled) options
@@ -71,6 +71,7 @@ pub fn init_tracing() -> (
                 environment: Some(environment.into()),
                 traces_sample_rate: 0.1, // Sample 10% of transactions for performance monitoring
                 debug: false,            // Disable debug mode for production
+                enable_logs: true,       // Enable structured log capture
                 before_send: Some(Arc::new(move |mut event| {
                     // Filter out health check and metrics endpoints
                     if let Some(request) = &event.request {
