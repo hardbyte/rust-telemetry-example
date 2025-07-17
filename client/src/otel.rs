@@ -34,7 +34,7 @@ impl<'a> RequestCarrier<'a> {
     }
 }
 
-impl<'a> opentelemetry::propagation::Injector for RequestCarrier<'a> {
+impl opentelemetry::propagation::Injector for RequestCarrier<'_> {
     fn set(&mut self, key: &str, value: String) {
         self.set_inner(key, value)
     }

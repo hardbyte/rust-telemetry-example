@@ -1,10 +1,7 @@
-use opentelemetry::trace::{TraceContextExt, TracerProvider};
+use opentelemetry::trace::TracerProvider;
 use reqwest::Client as HttpClient;
 use serde::Deserialize;
 use std::time::Duration;
-use tracing::{info_span, Span};
-use tracing_opentelemetry::OpenTelemetrySpanExt;
-use urlencoding;
 
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{propagation::TraceContextPropagator, trace::SdkTracerProvider};
@@ -172,7 +169,7 @@ async fn query_tempo_for_trace(
     validate_trace_id(trace_id)?;
 
     // Try direct Tempo API first, then Grafana proxy (using correct datasource ID 2)
-    let tempo_urls = vec![
+    let tempo_urls = [
         format!("{}/api/traces/{}", config.tempo_url, trace_id),
         format!(
             "{}/api/datasources/proxy/2/api/traces/{}",
@@ -249,7 +246,7 @@ async fn query_loki_for_logs(
         .as_nanos();
     let start_ns = now_ns - (config.log_lookback_duration.as_nanos());
 
-    let log_query = format!("{{trace_id=\"{}\"}}", trace_id);
+    let log_query = format!("{{trace_id=\"{}\"}}!", trace_id);
     let loki_query_url = format!(
         "{}/api/datasources/proxy/3/loki/api/v1/query_range?query={}&start={}&end={}&direction=forward",
         config.telemetry_url,
@@ -322,7 +319,7 @@ async fn query_prometheus_for_metrics(
     validate_trace_id(trace_id)?;
 
     let prom_query = format!(
-        "sum(traces_spanmetrics_calls_total{{service=\"{}\", span_kind=\"server\", span_name=\"{}\", trace_id=\"{}\"}}) by (span_name)",
+        "sum(traces_spanmetrics_calls_total{{service=\"{}\", span_kind=\"server\", span_name=\"{}\", trace_id=\"{}\"}})! by (span_name)",
         EXPECTED_SERVICE_NAME, EXPECTED_SPAN_NAME, trace_id
     );
 
@@ -481,57 +478,6 @@ async fn execute_traced_request(config: &TestConfig) -> TestResult<(String, Http
     Ok((trace_id, http_client))
 }
 
-fn extract_trace_id(span: &Span) -> TestResult<String> {
-    // First try to get trace ID from the tracing span context
-    let otel_context = span.context();
-    let span_ref = otel_context.span();
-    let span_context = span_ref.span_context();
-    let trace_id_val = span_context.trace_id();
-
-    // Check if we got a valid trace ID (not all zeros)
-    if trace_id_val.to_bytes() != [0u8; 16] {
-        let trace_id = format!("{:032x}", trace_id_val);
-        validate_trace_id(&trace_id)?;
-        println!(
-            "🔍 Generated trace ID: {} (length: {})",
-            trace_id,
-            trace_id.len()
-        );
-        Ok(trace_id)
-    } else {
-        // Fallback: generate a random trace ID for testing purposes
-        use opentelemetry::trace::TraceId;
-        let random_trace_id = TraceId::from_bytes(rand::random::<[u8; 16]>());
-        let trace_id = format!("{:032x}", random_trace_id);
-        validate_trace_id(&trace_id)?;
-        println!(
-            "🔍 Generated fallback trace ID: {} (length: {})",
-            trace_id,
-            trace_id.len()
-        );
-        Ok(trace_id)
-    }
-}
-
-async fn build_traced_request(
-    http_client: &HttpClient,
-    span: &Span,
-    config: &TestConfig,
-) -> TestResult<reqwest::Request> {
-    let endpoint_url = format!("{}{}", config.app_url, config.books_endpoint);
-    let mut request = http_client
-        .get(&endpoint_url)
-        .build()
-        .map_err(|e| TestError::new("request_building", e.to_string()))?;
-
-    let otel_context = span.context();
-    opentelemetry::global::get_text_map_propagator(|injector| {
-        injector.inject_context(&otel_context, &mut RequestCarrier::new(&mut request));
-    });
-
-    Ok(request)
-}
-
 async fn wait_for_trace_propagation(config: &TestConfig) {
     println!("⏳ Waiting for trace propagation...");
     tokio::time::sleep(config.trace_propagation_wait).await;
@@ -609,46 +555,3 @@ async fn verify_prometheus_metrics(
     println!("✅ Prometheus verification successful");
     Ok(())
 }
-
-// HTTP header injection for trace context
-mod helpers {
-    use std::collections::HashMap;
-
-    pub struct RequestCarrier<'a> {
-        request: &'a mut reqwest::Request,
-    }
-
-    impl<'a> RequestCarrier<'a> {
-        pub fn new(request: &'a mut reqwest::Request) -> Self {
-            Self { request }
-        }
-    }
-
-    impl<'a> opentelemetry::propagation::Injector for RequestCarrier<'a> {
-        fn set(&mut self, key: &str, value: String) {
-            if let Ok(header_name) = reqwest::header::HeaderName::from_bytes(key.as_bytes()) {
-                if let Ok(header_value) = reqwest::header::HeaderValue::from_str(&value) {
-                    self.request.headers_mut().insert(header_name, header_value);
-                }
-            }
-        }
-    }
-
-    pub struct HeaderMapCarrier<'a> {
-        headers: &'a mut HashMap<String, String>,
-    }
-
-    impl<'a> HeaderMapCarrier<'a> {
-        pub fn new(headers: &'a mut HashMap<String, String>) -> Self {
-            Self { headers }
-        }
-    }
-
-    impl<'a> opentelemetry::propagation::Injector for HeaderMapCarrier<'a> {
-        fn set(&mut self, key: &str, value: String) {
-            self.headers.insert(key.to_string(), value);
-        }
-    }
-}
-
-use helpers::RequestCarrier;

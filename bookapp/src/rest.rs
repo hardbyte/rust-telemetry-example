@@ -138,7 +138,7 @@ async fn queue_background_ingestion_task(producer: &FutureProducer, new_id: i32)
 
     // Send message to Kafka
     if let Err(e) =
-        crate::book_ingestion::send_book_ingestion_message(&producer, &book_message, &otel_context)
+        crate::book_ingestion::send_book_ingestion_message(producer, &book_message, &otel_context)
             .await
     {
         tracing::error!(

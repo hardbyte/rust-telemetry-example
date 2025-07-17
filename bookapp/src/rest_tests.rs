@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
     use crate::book_details::{BookDetailsProvider, StubBookDetailsProvider};
     use crate::db::BookStatus;
     use crate::{book_ingestion, db};
@@ -72,7 +72,7 @@ mod tests {
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri(&format!("/books/{}", book_id))
+                    .uri(format!("/books/{}", book_id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -119,7 +119,7 @@ mod tests {
         let app = setup_transactional_test_app(pool.clone()).await;
         let req = Request::builder()
             .method("PATCH")
-            .uri(&format!("/books/{}", book_id))
+            .uri(format!("/books/{}", book_id))
             .header("content-type", "application/json")
             .body(Body::from(
                 r#"{"author":"Updated Author","title":"Updated Title"}"#,
@@ -168,7 +168,7 @@ mod tests {
         let app = setup_transactional_test_app(pool).await;
         let req = Request::builder()
             .method("PATCH")
-            .uri(&format!("/books/{}", book_id))
+            .uri(format!("/books/{}", book_id))
             .header("content-type", "application/json")
             .body(Body::from(r#"{"invalid json"#))
             .unwrap();
@@ -305,7 +305,7 @@ mod tests {
         let app = setup_transactional_test_app(pool.clone()).await;
         let req = Request::builder()
             .method("DELETE")
-            .uri(&format!("/books/{}", book_id))
+            .uri(format!("/books/{}", book_id))
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
@@ -314,7 +314,7 @@ mod tests {
 
         // Verify the book is actually deleted by trying to fetch it
         let get_req = Request::builder()
-            .uri(&format!("/books/{}", book_id))
+            .uri(format!("/books/{}", book_id))
             .body(Body::empty())
             .unwrap();
         let get_response = app.oneshot(get_req).await.unwrap();

@@ -1,7 +1,7 @@
 services:
 
   app:
-    profiles: [default]
+    profiles: [default, ci]
     build: .
     environment:
       DATABASE_URL: "postgres://postgres:password@db:5432/bookapp"
@@ -23,7 +23,7 @@ services:
         condition: service_healthy
 
   backend:
-    profiles: [default]
+    profiles: [default, ci]
     build: .
     environment:
       DATABASE_URL: "postgres://postgres:password@db:5432/bookapp"
@@ -87,7 +87,7 @@ services:
 
 
   telemetry:
-    profiles: [default]
+    profiles: [default, ci]
     image: grafana/otel-lgtm:0.11.5
     depends_on:
       db:
@@ -117,6 +117,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 
   integration-tester:
+    profiles: [default, ci]
     build:
       context: .
       target: builder # Use the builder stage from the Dockerfile
@@ -136,11 +137,5 @@ services:
     depends_on:
       app:
         condition: service_started
-      backend:
-        condition: service_started
       telemetry:
-        condition: service_healthy
-      db: # Added db as app and backend depend on it.
-        condition: service_healthy
-      kafka: # Added kafka as app and backend depend on it.
         condition: service_healthy
