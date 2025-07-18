@@ -104,7 +104,7 @@ pub async fn delete_book(connection_pool: &PgPool, id: i32) -> Result<()> {
     Ok(())
 }
 
-#[tracing::instrument(skip(connection_pool), fields(book.id = %book.id, book.author = %book.author, book.title = %book.title, book.status = ?book.status))]
+#[tracing::instrument(name="db update book", skip(connection_pool), fields(book.id = %book.id, book.author = %book.author, book.title = %book.title, book.status = ?book.status))]
 pub async fn update_book(connection_pool: &PgPool, book: Book) -> Result<i32> {
     let res = sqlx::query!(
         r#"
