@@ -82,7 +82,7 @@ pub fn init_tracing() -> (
                         }
                     }
 
-                    // Add service context - use hardcoded value to avoid lifetime issues
+                    // Add service context
                     event
                         .tags
                         .insert("service".to_string(), "bookapp".to_string());
@@ -190,6 +190,8 @@ pub fn init_tracing() -> (
         sentry::integrations::tracing::layer().event_filter(|md| match *md.level() {
             tracing::Level::ERROR => sentry::integrations::tracing::EventFilter::Event,
             tracing::Level::WARN => sentry::integrations::tracing::EventFilter::Breadcrumb,
+            tracing::Level::INFO => sentry::integrations::tracing::EventFilter::Log,
+            tracing::Level::DEBUG => sentry::integrations::tracing::EventFilter::Ignore,
             _ => sentry::integrations::tracing::EventFilter::Ignore,
         });
 

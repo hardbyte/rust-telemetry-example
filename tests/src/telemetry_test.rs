@@ -302,10 +302,8 @@ async fn query_tempo_for_trace(
                                 if let Ok(tempo_response) =
                                     serde_json::from_str::<TempoResponse>(&response_text)
                                 {
-                                    if let Some(batch) = tempo_response
-                                        .batches
-                                        .iter()
-                                        .find(|batch| {
+                                    if let Some(batch) =
+                                        tempo_response.batches.iter().find(|batch| {
                                             batch.resource.attributes.iter().any(|kv| {
                                                 kv.key == "service.name"
                                                     && kv.value.string_value
@@ -315,8 +313,7 @@ async fn query_tempo_for_trace(
                                             })
                                         })
                                     {
-                                        if let Some(scope_span) = batch.scope_spans.first()
-                                        {
+                                        if let Some(scope_span) = batch.scope_spans.first() {
                                             if scope_span.spans.iter().any(|s| {
                                                 s.name == config.expected_span_name
                                                     && s.kind == "SPAN_KIND_SERVER"
@@ -529,7 +526,7 @@ async fn test_root_endpoint_generates_telemetry() -> TestResult<()> {
     let (trace_id, http_client) = execute_traced_request(&config).await?;
     wait_for_trace_propagation(&config).await;
 
-    // Test all telemetry systems now that trace ID extraction works
+    // Test all telemetry systems
     verify_telemetry_in_all_systems(&http_client, &trace_id, &config).await?;
 
     println!("✅ Test completed successfully!");
@@ -639,23 +636,17 @@ async fn query_tempo_for_trace_with_error_status(
                         if let Ok(tempo_response) =
                             serde_json::from_str::<TempoResponse>(&response_text)
                         {
-                            if let Some(batch) = tempo_response
-                                .batches
-                                .iter()
-                                .find(|batch| {
-                                    batch.resource.attributes.iter().any(|kv| {
-                                        kv.key == "service.name"
-                                            && kv.value.string_value
-                                                == Some(config.expected_service_name.clone())
-                                    })
+                            if let Some(batch) = tempo_response.batches.iter().find(|batch| {
+                                batch.resource.attributes.iter().any(|kv| {
+                                    kv.key == "service.name"
+                                        && kv.value.string_value
+                                            == Some(config.expected_service_name.clone())
                                 })
-                            {
+                            }) {
                                 if let Some(scope_span) = batch.scope_spans.first() {
-                                    if scope_span
-                                        .spans
-                                        .iter()
-                                        .any(|s| s.status.code == Some("STATUS_CODE_ERROR".to_string()))
-                                    {
+                                    if scope_span.spans.iter().any(|s| {
+                                        s.status.code == Some("STATUS_CODE_ERROR".to_string())
+                                    }) {
                                         println!("Found trace with error status.");
                                         return Ok(());
                                     }
