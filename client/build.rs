@@ -29,7 +29,26 @@ fn main() {
         .generate_tokens(&spec)
         .expect("Could not generate tokens");
     let ast = syn::parse2(tokens).unwrap();
-    let content = prettyplease::unparse(&ast);
+    let mut content = prettyplease::unparse(&ast);
+
+    // Fix clippy::uninlined_format_args warnings by replacing format string patterns
+    content = content.replace(
+        r#"format!("error converting supplied value for author: {}", e)"#,
+        r#"format!("error converting supplied value for author: {e}")"#,
+    );
+    content = content.replace(
+        r#"format!("error converting supplied value for id: {}", e)"#,
+        r#"format!("error converting supplied value for id: {e}")"#,
+    );
+    content = content.replace(
+        r#"format!("error converting supplied value for title: {}", e)"#,
+        r#"format!("error converting supplied value for title: {e}")"#,
+    );
+    content = content.replace(
+        r#"format!("conversion to `BookCreateIn` for body failed: {}", s)"#,
+        r#"format!("conversion to `BookCreateIn` for body failed: {s}")"#,
+    );
+
     let content = format!("#![allow(clippy::all)]\n{content}");
 
     let mut out_file = std::path::Path::new("src").to_path_buf();

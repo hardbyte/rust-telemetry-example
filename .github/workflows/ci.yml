@@ -37,16 +37,16 @@ jobs:
       run: cargo fmt --all -- --check
 
     - name: Run clippy
-      run: cargo clippy --all-targets --all-features -- -D warnings
+      run: SQLX_OFFLINE=true cargo clippy --all-targets --all-features -- -D warnings
 
     - name: Build workspace
-      run: cargo build --workspace
+      run: SQLX_OFFLINE=true cargo build --workspace
 
     # Start services for both unit tests (with external access) and integration tests
     - name: Start services for testing
       run: |
         echo "Starting Docker services..."
-        docker compose up -d --build
+        docker compose --profile ci up -d --build
         
         echo "Waiting for core services (DB, Kafka) to be ready..."
         max_attempts=20
@@ -135,4 +135,4 @@ jobs:
 
     - name: Cleanup
       if: always()
-      run: docker compose down -v
+      run: docker compose --profile ci down -v

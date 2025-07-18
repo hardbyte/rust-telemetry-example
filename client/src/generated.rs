@@ -170,7 +170,7 @@ pub mod types {
             {
                 self.author = value
                     .try_into()
-                    .map_err(|e| format!("error converting supplied value for author: {}", e));
+                    .map_err(|e| format!("error converting supplied value for author: {e}"));
                 self
             }
             pub fn id<T>(mut self, value: T) -> Self
@@ -180,7 +180,7 @@ pub mod types {
             {
                 self.id = value
                     .try_into()
-                    .map_err(|e| format!("error converting supplied value for id: {}", e));
+                    .map_err(|e| format!("error converting supplied value for id: {e}"));
                 self
             }
             pub fn title<T>(mut self, value: T) -> Self
@@ -190,7 +190,7 @@ pub mod types {
             {
                 self.title = value
                     .try_into()
-                    .map_err(|e| format!("error converting supplied value for title: {}", e));
+                    .map_err(|e| format!("error converting supplied value for title: {e}"));
                 self
             }
         }
@@ -240,7 +240,7 @@ pub mod types {
             {
                 self.author = value
                     .try_into()
-                    .map_err(|e| format!("error converting supplied value for author: {}", e));
+                    .map_err(|e| format!("error converting supplied value for author: {e}"));
                 self
             }
             pub fn title<T>(mut self, value: T) -> Self
@@ -250,7 +250,7 @@ pub mod types {
             {
                 self.title = value
                     .try_into()
-                    .map_err(|e| format!("error converting supplied value for title: {}", e));
+                    .map_err(|e| format!("error converting supplied value for title: {e}"));
                 self
             }
         }
@@ -498,7 +498,7 @@ pub mod builder {
             self.body = value
                 .try_into()
                 .map(From::from)
-                .map_err(|s| format!("conversion to `BookCreateIn` for body failed: {}", s));
+                .map_err(|s| format!("conversion to `BookCreateIn` for body failed: {s}"));
             self
         }
         pub fn body_map<F>(mut self, f: F) -> Self
@@ -714,7 +714,7 @@ pub mod builder {
             self.body = value
                 .try_into()
                 .map(From::from)
-                .map_err(|s| format!("conversion to `BookCreateIn` for body failed: {}", s));
+                .map_err(|s| format!("conversion to `BookCreateIn` for body failed: {s}"));
             self
         }
         pub fn body_map<F>(mut self, f: F) -> Self
