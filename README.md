@@ -95,6 +95,7 @@ This repository demonstrates several production-ready observability patterns:
 - **Automatic Metrics Generation**: In addition to custom application metrics, the OTEL Collector is configured to generate span metrics and service graphs directly from trace data. This provides RED metrics (Rate, Errors, Duration) with minimal instrumentation effort.
 - **Configurable Error Injection**: A middleware is included that can be configured at runtime to inject errors for specific API endpoints. This is a powerful tool for testing system resilience, alerts, and error-tracking integrations.
 - **Instrumented Load Testing**: The included Locust load testing script is itself instrumented with OpenTelemetry, allowing you to trace requests originating from the load generator all the way through the system.
+- **Health Monitoring**: Dedicated `/health` endpoint for application health checks, monitored by OpenTelemetry Collector's httpcheck receiver without generating traces, keeping observability data clean.
 
 ## A Deeper Look
 
@@ -144,10 +145,12 @@ the `OpenTelemetryTracingBridge` - these can be viewed in Loki.
 Sentry is integrated for robust error tracking. The custom SentryOtelCorrelationLayer bridges the two ecosystems, providing a unified debugging experience.
 When an error occurs:
 
-- `tracing::error!` or `tracing::warn!` is called.
-- The custom layer reads the current OpenTelemetry trace_id.
-- The trace ID is attached as a tag to the event sent to Sentry.
-- A developer can now copy the trace ID from a Sentry issue and paste it into Grafana/Tempo to instantly find the complete distributed trace associated with that error.
+**Key Features:**
+- **Structured Log Capture**: Sentry's `logs` feature captures structured log events with rich context
+- **Automatic Trace Correlation**: OpenTelemetry trace IDs are automatically embedded as `otel.trace_id` and `otel.span_id` tags
+- **Cross-Platform Navigation**: Copy trace ID from Sentry issue → paste into Grafana/Tempo for full distributed trace context
+- **Smart Filtering**: Health checks and metrics endpoints are excluded from error reporting to reduce noise
+- **Enhanced Context**: Combines Sentry's native error tracking with OpenTelemetry's distributed tracing
 
 
 ## Request Lifecycle (Sequence Diagram)
@@ -201,33 +204,48 @@ cp .env.example .env
 # Edit .env to add your SENTRY_DSN if you want error tracking
 
 docker compose build
-docker compose up
+docker compose --profile default up
 ```
 
 ### Docker Compose Profiles
 
 The project uses Docker Compose profiles to support different deployment scenarios:
 
-- **Default profile**: Full application stack (app, backend, database, Kafka, observability)
-- **CI profile**: Minimal stack for testing (database, Kafka only)
+- **Default profile**: Full application stack (app, backend, database, Kafka, observability, integration tests)
+- **CI profile**: Infrastructure for testing (database, Kafka, observability, integration tests)
 
 To run specific profiles:
 
 ```shell
-# Run full application (default)
-docker compose up
+# Run full application stack (recommended)
+docker compose --profile default up
 
-# Run only infrastructure for development
+# Run detached (background)
+docker compose --profile default up -d
+
+# Run only infrastructure for development/testing
 docker compose --profile ci up
 
-# Run specific services
-docker compose up db kafka
+# Run specific services (without profiles)
+docker compose up db kafka telemetry
 ```
 
+**Note**: Due to service profiles, you must specify `--profile default` to run the complete application stack including the main app and backend services.
+
+
+## Key Endpoints
 
 ```http request
 ### GET all books
 GET http://localhost:8000/books
+Accept: application/json
+
+### Health check
+GET http://localhost:8000/health
+Accept: application/json
+
+### Error injection configuration  
+GET http://localhost:8000/error-injection
 Accept: application/json
 
 ```
@@ -281,4 +299,25 @@ Prepared metadata is stored in workspace level `.sqlx` directory.
 ```shell
 cargo sqlx prepare --workspace
 ```
+
+## Testing
+
+The project includes comprehensive integration tests that verify end-to-end telemetry functionality:
+
+```shell
+# Run unit tests
+cargo test --package bookapp
+
+# Run integration tests (requires running services)
+cargo test --package integration-tests
+
+# Use the test script for automated setup
+./run_tests.sh
+```
+
+Integration tests verify:
+- Trace context propagation across HTTP requests
+- OpenTelemetry data collection in Tempo, Loki, and Prometheus
+- Error injection and telemetry generation
+- Cross-service trace correlation
 
