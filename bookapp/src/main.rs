@@ -14,16 +14,24 @@ use crate::book_details::{BookDetailsProvider, RemoteBookDetailsProvider};
 use std::sync::Arc;
 
 use anyhow::{Ok, Result};
-use axum::{Extension, Router};
+use axum::{Extension, Json, Router};
 use axum_tracing_opentelemetry::middleware::{OtelAxumLayer, OtelInResponseLayer};
 use rdkafka::producer::FutureProducer;
 use sentry_tower::NewSentryLayer;
+use serde_json::{json, Value};
 use tokio::signal::unix::{signal, SignalKind};
 
 use crate::db::init_db;
 use sqlx::PgPool;
 use tokio::task;
 use tracing::info;
+
+async fn health() -> Json<Value> {
+    Json(json!({
+        "status": "healthy",
+        "service": "bookapp"
+    }))
+}
 
 fn router(connection_pool: PgPool, producer: FutureProducer) -> Router {
     // Create the ErrorInjectionConfigStore
@@ -71,9 +79,8 @@ fn router(connection_pool: PgPool, producer: FutureProducer) -> Router {
                 .build()
                 .expect("Failed to build otel metrics layer"),
         )
-
-    // Other non-traced routes can go after this:
-    //.route("/health", get(health)) // request processed without span / trace
+        // Other non-traced routes can go after this:
+        .route("/health", axum::routing::get(health)) // request processed without span / trace
 }
 
 #[tokio::main]

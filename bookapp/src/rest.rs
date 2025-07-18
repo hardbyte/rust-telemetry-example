@@ -77,7 +77,7 @@ async fn delete_book(
     }
 }
 
-#[tracing::instrument(skip(con))]
+#[tracing::instrument(skip(con), fields(book.id = %id, book.author = %book_data.author, book.title = %book_data.title))]
 async fn update_book(
     Extension(con): Extension<PgPool>,
     Path(id): Path<i32>,
@@ -89,10 +89,16 @@ async fn update_book(
         title: book_data.title,
         status: BookStatus::Available,
     };
-    if let Ok(id) = db::update_book(&con, book).await {
-        Ok(Json(id))
-    } else {
-        Err(StatusCode::NOT_FOUND)
+
+    match db::update_book(&con, book).await {
+        Ok(rows_affected) => {
+            tracing::Span::current().record("db.rows_affected", rows_affected);
+            Ok(Json(rows_affected))
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to update book");
+            Err(StatusCode::NOT_FOUND)
+        }
     }
 }
 

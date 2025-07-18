@@ -16,7 +16,7 @@ const TELEMETRY_BASE_URL: &str = "http://localhost:3000";
 const TEMPO_DIRECT_URL: &str = "http://localhost:3200";
 const BOOKS_ENDPOINT: &str = "/books";
 const EXPECTED_SERVICE_NAME: &str = "bookapp";
-const EXPECTED_SPAN_NAME: &str = "HTTP GET /books";
+const EXPECTED_SPAN_NAME: &str = "GET /books";
 
 // Retry and timeout configuration
 const MAX_TEMPO_ATTEMPTS: usize = 10;
@@ -84,12 +84,11 @@ struct PrometheusResult {
 
 #[derive(Debug, Deserialize)]
 struct TempoResponse {
-    #[serde(rename = "resourceSpans")]
-    resource_spans: Vec<ResourceSpan>,
+    batches: Vec<Batch>,
 }
 
 #[derive(Debug, Deserialize)]
-struct ResourceSpan {
+struct Batch {
     resource: Resource,
     #[serde(rename = "scopeSpans")]
     scope_spans: Vec<ScopeSpan>,
@@ -102,6 +101,8 @@ struct Resource {
 
 #[derive(Debug, Deserialize)]
 struct ScopeSpan {
+    #[allow(dead_code)]
+    scope: Option<serde_json::Value>,
     spans: Vec<Span>,
 }
 
@@ -110,10 +111,26 @@ struct Span {
     #[serde(rename = "traceId")]
     #[allow(dead_code)]
     trace_id: String,
+    #[serde(rename = "spanId")]
+    #[allow(dead_code)]
+    span_id: String,
+    #[serde(rename = "parentSpanId")]
+    #[allow(dead_code)]
+    parent_span_id: Option<String>,
+    #[allow(dead_code)]
+    flags: Option<u32>,
     name: String,
     kind: String,
+    #[serde(rename = "startTimeUnixNano")]
+    #[allow(dead_code)]
+    start_time_unix_nano: Option<String>,
+    #[serde(rename = "endTimeUnixNano")]
+    #[allow(dead_code)]
+    end_time_unix_nano: Option<String>,
     #[allow(dead_code)]
     attributes: Vec<KeyValue>,
+    #[allow(dead_code)]
+    events: Option<Vec<serde_json::Value>>,
     status: Status,
 }
 
@@ -134,7 +151,7 @@ struct Value {
 
 #[derive(Debug, Deserialize)]
 struct Status {
-    code: String,
+    code: Option<String>,
 }
 
 // Test configuration and state
@@ -189,8 +206,7 @@ impl Default for TestConfig {
             expected_span_name: expected_span_name.clone(),
             prometheus_query: std::env::var("PROMETHEUS_QUERY").unwrap_or_else(|_| {
                 format!(
-                    "sum(traces_spanmetrics_calls_total{{service=\"{}\", span_kind=\"server\", span_name=\"{}\", trace_id=\"{{trace_id}}\"}})! by (span_name)",
-                    expected_service_name, expected_span_name
+                    "sum(traces_spanmetrics_calls_total{{service=\"{expected_service_name}\", span_kind=\"SPAN_KIND_SERVER\", span_name=\"{expected_span_name}\"}}) by (span_name)"
                 )
             }),
         }
@@ -206,7 +222,7 @@ fn init_test_tracing() -> TestResult<()> {
 
         let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
             .unwrap_or_else(|_| DEFAULT_OTLP_ENDPOINT.to_string());
-        println!("Test OTLP Exporter Endpoint: {}", otlp_endpoint);
+        println!("Test OTLP Exporter Endpoint: {otlp_endpoint}");
 
         let exporter = opentelemetry_otlp::SpanExporter::builder()
             .with_tonic()
@@ -262,7 +278,7 @@ async fn query_tempo_for_trace(
 
     // Try direct Tempo API first, then Grafana proxy
     let tempo_urls = [
-        format!("{}/api/traces/{}", config.tempo_url, trace_id),
+        format!("{}/api/traces/{trace_id}", config.tempo_url),
         format!(
             "{}/api/datasources/proxy/{}/api/traces/{}",
             config.telemetry_url, config.tempo_datasource_id, trace_id
@@ -270,7 +286,7 @@ async fn query_tempo_for_trace(
     ];
 
     for attempt in 1..=MAX_TEMPO_ATTEMPTS {
-        println!("Attempt {} for Tempo trace query", attempt);
+        println!("Attempt {attempt} for Tempo trace query");
 
         for (i, tempo_url) in tempo_urls.iter().enumerate() {
             println!("Trying URL {}: {}", i + 1, tempo_url);
@@ -278,7 +294,7 @@ async fn query_tempo_for_trace(
             match http_client.get(tempo_url).send().await {
                 Ok(response) => {
                     let status = response.status();
-                    println!("Tempo API response status: {}", status);
+                    println!("Tempo API response status: {status}");
 
                     if status == reqwest::StatusCode::OK {
                         match response.text().await {
@@ -286,9 +302,11 @@ async fn query_tempo_for_trace(
                                 if let Ok(tempo_response) =
                                     serde_json::from_str::<TempoResponse>(&response_text)
                                 {
-                                    if let Some(resource_span) =
-                                        tempo_response.resource_spans.iter().find(|rs| {
-                                            rs.resource.attributes.iter().any(|kv| {
+                                    if let Some(batch) = tempo_response
+                                        .batches
+                                        .iter()
+                                        .find(|batch| {
+                                            batch.resource.attributes.iter().any(|kv| {
                                                 kv.key == "service.name"
                                                     && kv.value.string_value
                                                         == Some(
@@ -297,7 +315,7 @@ async fn query_tempo_for_trace(
                                             })
                                         })
                                     {
-                                        if let Some(scope_span) = resource_span.scope_spans.first()
+                                        if let Some(scope_span) = batch.scope_spans.first()
                                         {
                                             if scope_span.spans.iter().any(|s| {
                                                 s.name == config.expected_span_name
@@ -310,40 +328,33 @@ async fn query_tempo_for_trace(
                                     }
                                 } else {
                                     println!(
-                                        "Failed to parse Tempo JSON response: {}",
-                                        response_text
+                                        "Failed to parse Tempo JSON response: {response_text}"
                                     );
                                 }
                             }
                             Err(e) => {
-                                println!("Failed to read response text: {:?}", e);
+                                println!("Failed to read response text: {e:?}");
                             }
                         }
                     } else if status != reqwest::StatusCode::NOT_FOUND {
                         let error_body = response.text().await.unwrap_or_default();
-                        println!(
-                            "Error response from {}: {} - {}",
-                            tempo_url, status, error_body
-                        );
+                        println!("Error response from {tempo_url}: {status} - {error_body}");
                     }
                 }
-                Err(e) => println!("Request failed for {}: {:?}", tempo_url, e),
+                Err(e) => println!("Request failed for {tempo_url}: {e:?}"),
             }
         }
 
         if attempt < MAX_TEMPO_ATTEMPTS {
             let delay = Duration::from_secs(attempt as u64 * BASE_RETRY_DELAY_SECS);
-            println!("Waiting {:?} before next attempt...", delay);
+            println!("Waiting {delay:?} before next attempt...");
             tokio::time::sleep(delay).await;
         }
     }
 
     Err(TestError::new(
         "tempo_query",
-        format!(
-            "Failed to find trace {} after {} attempts",
-            trace_id, MAX_TEMPO_ATTEMPTS
-        ),
+        format!("Failed to find trace {trace_id} after {MAX_TEMPO_ATTEMPTS} attempts"),
     ))
 }
 
@@ -360,7 +371,7 @@ async fn query_loki_for_logs(
         .as_nanos();
     let start_ns = now_ns - (config.log_lookback_duration.as_nanos());
 
-    let log_query = format!("{{trace_id=\"{}\"}}!", trace_id);
+    let log_query = format!("{{service_name=\"{}\"}}", config.expected_service_name);
     let loki_query_url = format!(
         "{}/api/datasources/proxy/{}/loki/api/v1/query_range?query={}&start={}&end={}&direction=forward",
         config.telemetry_url,
@@ -370,15 +381,15 @@ async fn query_loki_for_logs(
         now_ns
     );
 
-    println!("Loki query URL: {}", loki_query_url);
+    println!("Loki query URL: {loki_query_url}");
 
     for attempt in 1..=MAX_LOKI_ATTEMPTS {
-        println!("Attempt {} for Loki logs query", attempt);
+        println!("Attempt {attempt} for Loki logs query");
 
         match http_client.get(&loki_query_url).send().await {
             Ok(response) => {
                 let status = response.status();
-                println!("Loki API response status: {}", status);
+                println!("Loki API response status: {status}");
 
                 if status == reqwest::StatusCode::OK {
                     match response.text().await {
@@ -394,25 +405,25 @@ async fn query_loki_for_logs(
 
                                     if log_count > 0 {
                                         println!(
-                                            "Found {} log entries in Loki for trace ID {}.",
-                                            log_count, trace_id
+                                            "Found {log_count} log entries in Loki for service {}.",
+                                            config.expected_service_name
                                         );
                                         return Ok(());
                                     }
                                 }
-                                Err(e) => println!("Failed to parse Loki JSON response: {:?}", e),
+                                Err(e) => println!("Failed to parse Loki JSON response: {e:?}"),
                             }
                         }
-                        Err(e) => println!("Failed to read Loki response: {:?}", e),
+                        Err(e) => println!("Failed to read Loki response: {e:?}"),
                     }
                 }
             }
-            Err(e) => println!("Loki request failed: {:?}", e),
+            Err(e) => println!("Loki request failed: {e:?}"),
         }
 
         if attempt < MAX_LOKI_ATTEMPTS {
             let delay = Duration::from_secs(attempt as u64 * BASE_RETRY_DELAY_SECS);
-            println!("Waiting {:?} before next attempt...", delay);
+            println!("Waiting {delay:?} before next attempt...");
             tokio::time::sleep(delay).await;
         }
     }
@@ -420,8 +431,8 @@ async fn query_loki_for_logs(
     Err(TestError::new(
         "loki_query",
         format!(
-            "Failed to find logs for trace {} after {} attempts",
-            trace_id, MAX_LOKI_ATTEMPTS
+            "Failed to find logs for service {} after {MAX_LOKI_ATTEMPTS} attempts",
+            config.expected_service_name
         ),
     ))
 }
@@ -433,7 +444,7 @@ async fn query_prometheus_for_metrics(
 ) -> TestResult<()> {
     validate_trace_id(trace_id)?;
 
-    let prom_query = config.prometheus_query.replace("{trace_id}", trace_id);
+    let prom_query = &config.prometheus_query;
 
     let prometheus_query_url = format!(
         "{}/api/datasources/proxy/{}/api/v1/query?query={}",
@@ -442,15 +453,15 @@ async fn query_prometheus_for_metrics(
         urlencoding::encode(&prom_query)
     );
 
-    println!("Prometheus query URL: {}", prometheus_query_url);
+    println!("Prometheus query URL: {prometheus_query_url}");
 
     for attempt in 1..=MAX_PROMETHEUS_ATTEMPTS {
-        println!("Attempt {} for Prometheus metrics query", attempt);
+        println!("Attempt {attempt} for Prometheus metrics query");
 
         match http_client.get(&prometheus_query_url).send().await {
             Ok(response) => {
                 let status = response.status();
-                println!("Prometheus API response status: {}", status);
+                println!("Prometheus API response status: {status}");
 
                 if status == reqwest::StatusCode::OK {
                     match response.text().await {
@@ -468,15 +479,14 @@ async fn query_prometheus_for_metrics(
                                             {
                                                 match value_str.parse::<f64>() {
                                                     Ok(val) if val >= 1.0 => {
-                                                        println!("Successfully found metric with value {} >= 1.0", val);
+                                                        println!("Successfully found metric with value {val} >= 1.0");
                                                         return Ok(());
                                                     }
                                                     Ok(val) => {
-                                                        println!("Metric value {} is < 1.0", val)
+                                                        println!("Metric value {val} is < 1.0")
                                                     }
                                                     Err(e) => println!(
-                                                        "Failed to parse metric value '{}': {:?}",
-                                                        value_str, e
+                                                        "Failed to parse metric value '{value_str}': {e:?}"
                                                     ),
                                                 }
                                             }
@@ -484,20 +494,20 @@ async fn query_prometheus_for_metrics(
                                     }
                                 }
                                 Err(e) => {
-                                    println!("Failed to parse Prometheus JSON response: {:?}", e)
+                                    println!("Failed to parse Prometheus JSON response: {e:?}")
                                 }
                             }
                         }
-                        Err(e) => println!("Failed to read Prometheus response: {:?}", e),
+                        Err(e) => println!("Failed to read Prometheus response: {e:?}"),
                     }
                 }
             }
-            Err(e) => println!("Prometheus request failed: {:?}", e),
+            Err(e) => println!("Prometheus request failed: {e:?}"),
         }
 
         if attempt < MAX_PROMETHEUS_ATTEMPTS {
             let delay = Duration::from_secs(attempt as u64 * BASE_RETRY_DELAY_SECS);
-            println!("Waiting {:?} before next attempt...", delay);
+            println!("Waiting {delay:?} before next attempt...");
             tokio::time::sleep(delay).await;
         }
     }
@@ -505,8 +515,7 @@ async fn query_prometheus_for_metrics(
     Err(TestError::new(
         "prometheus_query",
         format!(
-            "Failed to find metrics for trace {} after {} attempts",
-            trace_id, MAX_PROMETHEUS_ATTEMPTS
+            "Failed to find metrics for trace {trace_id} after {MAX_PROMETHEUS_ATTEMPTS} attempts"
         ),
     ))
 }
@@ -534,9 +543,14 @@ async fn test_error_endpoint_generates_error_trace() -> TestResult<()> {
 
     let http_client = HttpClient::new();
 
-    // Configure error injection
+    // Configure error injection with unique endpoint pattern
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    let test_endpoint = format!("/books/test-{}", timestamp);
     let error_injection_config = serde_json::json!({
-        "endpoint_pattern": "/books/1",
+        "endpoint_pattern": test_endpoint.clone(),
         "http_method": "GET",
         "error_rate": 1.0,
         "error_code": 500,
@@ -559,7 +573,7 @@ async fn test_error_endpoint_generates_error_trace() -> TestResult<()> {
 
     // Make a request that should fail
     let response = http_client
-        .get(format!("{}/books/1", config.app_url))
+        .get(format!("{}{}", config.app_url, test_endpoint))
         .send()
         .await
         .map_err(|e| TestError::new("http_request_error_case", e.to_string()))?;
@@ -577,7 +591,7 @@ async fn test_error_endpoint_generates_error_trace() -> TestResult<()> {
             } else {
                 return Err(TestError::new(
                     "trace_extraction_error_case",
-                    format!("Invalid traceparent format: {}", traceparent_str),
+                    format!("Invalid traceparent format: {traceparent_str}"),
                 ));
             }
         } else {
@@ -610,7 +624,7 @@ async fn query_tempo_for_trace_with_error_status(
     validate_trace_id(trace_id)?;
 
     let tempo_urls = [
-        format!("{}/api/traces/{}", config.tempo_url, trace_id),
+        format!("{}/api/traces/{trace_id}", config.tempo_url),
         format!(
             "{}/api/datasources/proxy/{}/api/traces/{}",
             config.telemetry_url, config.tempo_datasource_id, trace_id
@@ -625,20 +639,22 @@ async fn query_tempo_for_trace_with_error_status(
                         if let Ok(tempo_response) =
                             serde_json::from_str::<TempoResponse>(&response_text)
                         {
-                            if let Some(resource_span) =
-                                tempo_response.resource_spans.iter().find(|rs| {
-                                    rs.resource.attributes.iter().any(|kv| {
+                            if let Some(batch) = tempo_response
+                                .batches
+                                .iter()
+                                .find(|batch| {
+                                    batch.resource.attributes.iter().any(|kv| {
                                         kv.key == "service.name"
                                             && kv.value.string_value
                                                 == Some(config.expected_service_name.clone())
                                     })
                                 })
                             {
-                                if let Some(scope_span) = resource_span.scope_spans.first() {
+                                if let Some(scope_span) = batch.scope_spans.first() {
                                     if scope_span
                                         .spans
                                         .iter()
-                                        .any(|s| s.status.code == "STATUS_CODE_ERROR")
+                                        .any(|s| s.status.code == Some("STATUS_CODE_ERROR".to_string()))
                                     {
                                         println!("Found trace with error status.");
                                         return Ok(());
@@ -646,7 +662,7 @@ async fn query_tempo_for_trace_with_error_status(
                                 }
                             }
                         } else {
-                            println!("Failed to parse Tempo JSON response: {}", response_text);
+                            println!("Failed to parse Tempo JSON response: {response_text}");
                         }
                     }
                 }
@@ -657,10 +673,7 @@ async fn query_tempo_for_trace_with_error_status(
 
     Err(TestError::new(
         "tempo_error_query",
-        format!(
-            "Failed to find trace with error status for trace ID {}",
-            trace_id
-        ),
+        format!("Failed to find trace with error status for trace ID {trace_id}"),
     ))
 }
 
@@ -707,7 +720,7 @@ async fn execute_traced_request(config: &TestConfig) -> TestResult<(String, Http
             } else {
                 return Err(TestError::new(
                     "trace_extraction",
-                    format!("Invalid traceparent format: {}", traceparent_str),
+                    format!("Invalid traceparent format: {traceparent_str}"),
                 ));
             }
         } else {
@@ -761,14 +774,9 @@ async fn verify_telemetry_in_all_systems(
         ),
     }
 
-    // Prometheus verification (optional - metrics may need more time)
-    match prometheus_result {
-        Ok(()) => println!("✅ Prometheus verification successful"),
-        Err(e) => println!(
-            "⚠️  Prometheus verification failed (metrics may need more time): {}",
-            e.message
-        ),
-    }
+    // Prometheus verification (required)
+    prometheus_result.map_err(|e| TestError::new("prometheus_verification", e.message))?;
+    println!("✅ Prometheus verification successful");
 
     Ok(())
 }
@@ -778,7 +786,7 @@ async fn verify_tempo_trace(
     trace_id: &str,
     config: &TestConfig,
 ) -> TestResult<()> {
-    println!("🎯 Querying Tempo for trace: {}", trace_id);
+    println!("🎯 Querying Tempo for trace: {trace_id}");
     query_tempo_for_trace(http_client, trace_id, config)
         .await
         .map_err(|e| TestError::new("tempo_verification", e.message))?;
@@ -791,7 +799,7 @@ async fn verify_loki_logs(
     trace_id: &str,
     config: &TestConfig,
 ) -> TestResult<()> {
-    println!("📋 Querying Loki for logs with trace: {}", trace_id);
+    println!("📋 Querying Loki for logs with trace: {trace_id}");
     query_loki_for_logs(http_client, trace_id, config)
         .await
         .map_err(|e| TestError::new("loki_verification", e.message))?;
@@ -804,10 +812,7 @@ async fn verify_prometheus_metrics(
     trace_id: &str,
     config: &TestConfig,
 ) -> TestResult<()> {
-    println!(
-        "📊 Querying Prometheus for metrics with trace: {}",
-        trace_id
-    );
+    println!("📊 Querying Prometheus for metrics with trace: {trace_id}");
     query_prometheus_for_metrics(http_client, trace_id, config)
         .await
         .map_err(|e| TestError::new("prometheus_verification", e.message))?;
