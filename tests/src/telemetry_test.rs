@@ -447,7 +447,7 @@ async fn query_prometheus_for_metrics(
         "{}/api/datasources/proxy/{}/api/v1/query?query={}",
         config.telemetry_url,
         config.prometheus_datasource_id,
-        urlencoding::encode(&prom_query)
+        urlencoding::encode(prom_query)
     );
 
     println!("Prometheus query URL: {prometheus_query_url}");
@@ -545,7 +545,7 @@ async fn test_error_endpoint_generates_error_trace() -> TestResult<()> {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis();
-    let test_endpoint = format!("/books/test-{}", timestamp);
+    let test_endpoint = format!("/books/test-{timestamp}");
     let error_injection_config = serde_json::json!({
         "endpoint_pattern": test_endpoint.clone(),
         "http_method": "GET",
