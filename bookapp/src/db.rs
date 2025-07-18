@@ -104,6 +104,7 @@ pub async fn delete_book(connection_pool: &PgPool, id: i32) -> Result<()> {
     Ok(())
 }
 
+#[tracing::instrument(skip(connection_pool), fields(book.id = %book.id, book.author = %book.author, book.title = %book.title, book.status = ?book.status))]
 pub async fn update_book(connection_pool: &PgPool, book: Book) -> Result<i32> {
     let res = sqlx::query!(
         r#"
@@ -123,7 +124,16 @@ pub async fn update_book(connection_pool: &PgPool, book: Book) -> Result<i32> {
     .execute(connection_pool)
     .await?;
 
-    Ok(res.rows_affected().try_into().unwrap())
+    let rows_affected = res.rows_affected().try_into().unwrap();
+    tracing::Span::current().record("db.rows_affected", rows_affected);
+
+    if rows_affected == 0 {
+        tracing::warn!("Update operation affected 0 rows - book may not exist");
+    } else {
+        tracing::debug!("Successfully updated book");
+    }
+
+    Ok(rows_affected)
 }
 
 /// Insert a whole slice of `BookCreateIn` in one go and return their new IDs.

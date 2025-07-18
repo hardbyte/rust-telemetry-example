@@ -57,8 +57,7 @@ pub fn init_tracing() -> (
     let service_name = std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "bookapp".to_string());
     let environment =
         std::env::var("SENTRY_ENVIRONMENT").unwrap_or_else(|_| "development".to_string());
-    let release =
-        std::env::var("SENTRY_RELEASE").unwrap_or_else(|_| format!("{service_name}@dev"));
+    let release = std::env::var("SENTRY_RELEASE").unwrap_or_else(|_| format!("{service_name}@dev"));
 
     let sentry_guard = if sentry_dsn.is_empty() {
         // If no DSN provided, initialize with default (disabled) options
