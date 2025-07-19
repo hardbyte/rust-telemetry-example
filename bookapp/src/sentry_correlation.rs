@@ -99,25 +99,6 @@ impl SentryOtelCorrelationLayer {
         }
     }
 
-    /// Creates a correlation layer that processes events at the specified level and above.
-    ///
-    /// # Arguments
-    ///
-    /// * `level` - Minimum tracing level that triggers correlation
-    ///
-    /// # Example
-    ///
-    /// ```rust,no_run
-    /// use sentry_correlation::SentryOtelCorrelationLayer;
-    /// use tracing::Level;
-    ///
-    /// // Correlate both ERROR and WARN level events
-    /// let layer = SentryOtelCorrelationLayer::with_level(Level::WARN);
-    /// ```
-    pub fn with_level(level: tracing::Level) -> Self {
-        Self { min_level: level }
-    }
-
     /// Extracts OpenTelemetry trace context and adds it to Sentry scope.
     ///
     /// This method attempts to extract trace and span IDs from the OpenTelemetry
@@ -138,7 +119,10 @@ impl SentryOtelCorrelationLayer {
         // Try to get OpenTelemetry context from the event's span
         if let Some(span_ref) = ctx.event_span(event) {
             // Get OpenTelemetry extensions from the span
-            if let Some(otel_data) = span_ref.extensions().get::<tracing_opentelemetry::OtelData>() {
+            if let Some(otel_data) = span_ref
+                .extensions()
+                .get::<tracing_opentelemetry::OtelData>()
+            {
                 let parent_cx = &otel_data.parent_cx;
                 let span_ref = parent_cx.span();
                 let span_context = span_ref.span_context();
@@ -149,8 +133,8 @@ impl SentryOtelCorrelationLayer {
 
                     // Add OpenTelemetry context to Sentry scope for cross-platform correlation
                     sentry::configure_scope(|scope| {
-                        scope.set_tag("otel.trace_id", &format!("{:032x}", trace_id));
-                        scope.set_tag("otel.span_id", &format!("{:016x}", span_id));
+                        scope.set_tag("otel.trace_id", format!("{trace_id:032x}"));
+                        scope.set_tag("otel.span_id", format!("{span_id:016x}"));
                     });
                 }
             }
@@ -195,12 +179,6 @@ mod tests {
     #[test]
     fn test_new_layer_defaults_to_warn_level() {
         let layer = SentryOtelCorrelationLayer::new();
-        assert_eq!(layer.min_level, Level::WARN);
-    }
-
-    #[test]
-    fn test_with_level_sets_custom_level() {
-        let layer = SentryOtelCorrelationLayer::with_level(Level::WARN);
         assert_eq!(layer.min_level, Level::WARN);
     }
 

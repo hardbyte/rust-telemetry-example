@@ -44,7 +44,7 @@ opentelemetry-http = "0.30.0"
 tracing-loki = "0.2.6"
 hostname = "0.4.0"
 opentelemetry-appender-tracing = { version = "0.30.0" , features = ["experimental_use_tracing_span_context"]}
-sentry = { version = "0.41", features = ["tower", "tracing", "opentelemetry"] }
+sentry = { version = "0.41", features = ["tower", "tracing", "opentelemetry", "logs"] }
 sentry-tower = { version = "0.41", features = ["http", "axum-matched-path"] }
 hyper = "1.6.0"
 rand = "0.9.0"

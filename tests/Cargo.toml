@@ -1,0 +1,27 @@
+[package]
+name = "integration-tests"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "integration_tests"
+path = "src/lib.rs"
+
+[[test]]
+name = "telemetry_test"
+path = "src/telemetry_test.rs"
+harness = true
+
+[dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+reqwest = { workspace = true, features = ["json"] }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { version = "0.30.0", features = ["trace", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.30.0", features = ["reqwest-client", "grpc-tonic"] }
+tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+urlencoding = "2.1"
+rand = "0.9.0"

@@ -1,16 +1,15 @@
-use std::sync::Arc;
-use crate::db::{Book, BookCreateIn, BookStatus};
-use crate::{db};
 use crate::book_details::BookDetailsProvider;
+use crate::db;
+use crate::db::{Book, BookCreateIn, BookStatus};
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::routing::{delete, get, patch, post};
 use axum::{Extension, Json, Router};
 use rdkafka::producer::FutureProducer;
 use sqlx::PgPool;
+use std::sync::Arc;
 use tracing::Level;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-
 
 #[tracing::instrument(skip(con, details), fields(num_books))]
 async fn get_all_books(
@@ -31,7 +30,6 @@ async fn get_all_books(
         }
     }
 }
-
 
 #[tracing::instrument(skip(con), ret(level = Level::TRACE))]
 async fn get_book(
@@ -79,7 +77,7 @@ async fn delete_book(
     }
 }
 
-#[tracing::instrument(skip(con))]
+#[tracing::instrument(skip(con), fields(book.id = %id, book.author = %book_data.author, book.title = %book_data.title))]
 async fn update_book(
     Extension(con): Extension<PgPool>,
     Path(id): Path<i32>,
@@ -91,10 +89,16 @@ async fn update_book(
         title: book_data.title,
         status: BookStatus::Available,
     };
-    if let Ok(id) = db::update_book(&con, book).await {
-        Ok(Json(id))
-    } else {
-        Err(StatusCode::NOT_FOUND)
+
+    match db::update_book(&con, book).await {
+        Ok(rows_affected) => {
+            tracing::Span::current().record("db.rows_affected", rows_affected);
+            Ok(Json(rows_affected))
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to update book");
+            Err(StatusCode::NOT_FOUND)
+        }
     }
 }
 
@@ -140,7 +144,7 @@ async fn queue_background_ingestion_task(producer: &FutureProducer, new_id: i32)
 
     // Send message to Kafka
     if let Err(e) =
-        crate::book_ingestion::send_book_ingestion_message(&producer, &book_message, &otel_context)
+        crate::book_ingestion::send_book_ingestion_message(producer, &book_message, &otel_context)
             .await
     {
         tracing::error!(
@@ -164,4 +168,3 @@ pub fn book_service() -> Router {
         .route("/bulk_add", post(bulk_create_books))
         .route("/{id}", delete(delete_book))
 }
-

@@ -16,6 +16,16 @@ Content-Type: application/json
   "author": "F. Scott Fitzgerald"
 }
 
+### Update a book
+PATCH http://localhost:8000/books/1
+Content-Type: application/json
+
+{
+  "title": "The Great Gatsby",
+  "author": "F. Scott Fitzgerald",
+  "status": "Available"
+}
+
 ### Create a book with optional status
 POST http://localhost:8000/books/add
 Content-Type: application/json

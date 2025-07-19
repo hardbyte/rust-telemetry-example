@@ -40,6 +40,7 @@ receivers:
       insecure: true
     username: postgres
     password: password
+    databases: ["bookapp"]  # Only scrape the main database, ignore SQLx test databases
     collection_interval: 10s
     connection_pool:
       max_idle_time: 10m
@@ -61,7 +62,7 @@ receivers:
 
   httpcheck/app:
     targets:
-      - endpoint: "http://app:8000/error-injection"
+      - endpoint: "http://app:8000/health"
         method: "GET"
     collection_interval: 10s
 
@@ -107,7 +108,7 @@ processors:
         statements:
           - set(resource.attributes["container_id"], resource.attributes["host.name"])
           - delete_key(resource.attributes, "host.name")
-          - set(attributes["level"], severity_text)
+          - set(log.attributes["level"], log.severity_text)
 
   # To play nicer with prometheus we will add some extra labels to the metrics from the resource
   # attributes
@@ -133,15 +134,15 @@ processors:
 
 exporters:
   otlphttp/metrics:
-    endpoint: http://localhost:9090/api/v1/otlp
+    endpoint: http://127.0.0.1:9090/api/v1/otlp
     tls:
       insecure: true
   otlphttp/traces:
-    endpoint: http://localhost:4418
+    endpoint: http://127.0.0.1:4418
     tls:
       insecure: true
   otlphttp/logs:
-    endpoint: http://localhost:3100/otlp
+    endpoint: http://127.0.0.1:3100/otlp
     tls:
       insecure: true
   debug/metrics:
@@ -157,6 +158,10 @@ exporters:
 #    headers:
 #      authorization: Bearer ${env:AXIOM_API_KEY}
 #      x-axiom-dataset: rust-telemetry-example-bookapp
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
 
 connectors:
   # https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/connector/exceptionsconnector
@@ -180,6 +185,7 @@ connectors:
 
 
 service:
+  extensions: [health_check]
 
   pipelines:
     traces:

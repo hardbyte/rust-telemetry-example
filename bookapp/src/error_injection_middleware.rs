@@ -322,7 +322,7 @@ pub async fn error_injection_middleware(
 
     // Query the store for matching error injection configurations
     if let Some(config) = get_matching_error_injection_config(store, &path, &method).await {
-        tracing::Span::current().record("error_rate", &config.error_rate);
+        tracing::Span::current().record("error_rate", config.error_rate);
 
         // Generate a random number between 0.0 and 1.0
         let mut rng = rand::rng();
@@ -355,7 +355,28 @@ pub async fn error_injection_middleware(
                 "Error injection triggered: {}",
                 body
             );
-            
+
+            // Test Sentry structured logging capabilities
+            // This demonstrates the enhanced log capture with filtering
+            sentry::with_scope(
+                |scope| {
+                    scope.set_tag("error_type", "injected_error");
+                    scope.set_tag("endpoint", &path);
+                    scope.set_tag("method", &method);
+                    scope.set_extra("status_code", config.error_code.into());
+                    scope.set_extra("error_rate", config.error_rate.into());
+                },
+                || {
+                    // Use structured logging with Sentry capture
+                    tracing::info!(
+                        injected_error = true,
+                        endpoint = %path,
+                        method = %method,
+                        status = config.error_code,
+                        "Testing Sentry structured log capture"
+                    );
+                },
+            );
 
             return (status_code, body).into_response();
         }
