@@ -46,7 +46,7 @@ jobs:
     - name: Start services for testing
       run: |
         echo "Starting Docker services..."
-        docker compose up -d --build
+        docker compose --profile ci up -d --build
         
         echo "Waiting for core services (DB, Kafka) to be ready..."
         max_attempts=20
@@ -135,4 +135,4 @@ jobs:
 
     - name: Cleanup
       if: always()
-      run: docker compose down -v
+      run: docker compose --profile ci down -v
