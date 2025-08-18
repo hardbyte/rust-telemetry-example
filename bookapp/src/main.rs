@@ -36,7 +36,9 @@ async fn health() -> Json<Value> {
 fn router(db_pools: DatabasePools, producer: FutureProducer) -> Router {
     // Create the ErrorInjectionConfigStore
     let error_injection_store = std::sync::Arc::new(
-        error_injection_middleware::PostgresErrorInjectionConfigStore::new(db_pools.write_pool.clone()),
+        error_injection_middleware::PostgresErrorInjectionConfigStore::new(
+            db_pools.write_pool.clone(),
+        ),
     )
         as std::sync::Arc<dyn error_injection_middleware::ErrorInjectionConfigStore>;
 

@@ -2,9 +2,9 @@
 mod tests {
 
     use crate::book_details::{BookDetailsProvider, StubBookDetailsProvider};
+    use crate::book_ingestion;
     use crate::database::DatabasePools;
-    use crate::db::{BookRepository, BookRepositoryImpl, BookStatus, BookCreateIn};
-    use crate::{book_ingestion};
+    use crate::db::{BookCreateIn, BookRepository, BookRepositoryImpl, BookStatus};
     use axum::{
         body::Body,
         http::{Request, StatusCode},

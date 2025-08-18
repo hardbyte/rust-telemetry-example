@@ -42,10 +42,10 @@ impl DatabasePools {
         config: Option<DatabaseConfig>,
     ) -> Result<Self> {
         let config = config.unwrap_or_default();
-        
+
         info!(write_url = write_url, "Creating write pool");
         let write_pool = create_pool(write_url, &config).await?;
-        
+
         let read_pool = if let Some(read_url) = read_url {
             info!(read_url = read_url, "Creating separate read pool");
             create_pool(read_url, &config).await?
