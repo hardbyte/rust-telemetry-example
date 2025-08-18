@@ -1,0 +1,49 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT \n                id, \n                title, \n                author, \n                status as \"status: BookStatus\" \n            FROM books \n            ORDER BY title, author\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "author",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "status: BookStatus",
+        "type_info": {
+          "Custom": {
+            "name": "book_status",
+            "kind": {
+              "Enum": [
+                "available",
+                "borrowed",
+                "lost"
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7db1e3b6c8c22672ae354a1544a5e45cf6e5108ebce1cbdbfff335c3dfdd3cc7"
+}

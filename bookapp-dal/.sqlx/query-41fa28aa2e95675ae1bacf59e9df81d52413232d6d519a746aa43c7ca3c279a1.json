@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE books \n            SET status = $2 \n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        {
+          "Custom": {
+            "name": "book_status",
+            "kind": {
+              "Enum": [
+                "available",
+                "borrowed",
+                "lost"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "41fa28aa2e95675ae1bacf59e9df81d52413232d6d519a746aa43c7ca3c279a1"
+}
