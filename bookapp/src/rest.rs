@@ -1,23 +1,23 @@
 use crate::book_details::BookDetailsProvider;
-use crate::db;
-use crate::db::{Book, BookCreateIn, BookStatus};
+use crate::database::DatabasePools;
+use crate::db::{Book, BookCreateIn, BookRepository, BookRepositoryImpl, BookStatus};
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::routing::{delete, get, patch, post};
 use axum::{Extension, Json, Router};
 use rdkafka::producer::FutureProducer;
-use sqlx::PgPool;
 use std::sync::Arc;
 use tracing::Level;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-#[tracing::instrument(skip(con, details), fields(num_books))]
+#[tracing::instrument(skip(db_pools, details), fields(num_books))]
 async fn get_all_books(
-    Extension(con): Extension<PgPool>,
+    Extension(db_pools): Extension<DatabasePools>,
     Extension(details): Extension<Arc<dyn BookDetailsProvider>>,
 ) -> Result<Json<Vec<Book>>, StatusCode> {
     tracing::info!("Getting all books");
-    match db::get_all_books(&con).await {
+    let repo = BookRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
+    match repo.find_all().await {
         Ok(books) => {
             tracing::Span::current().record("num_books", books.len() as i64);
             // delegate to injected provider
@@ -31,9 +31,9 @@ async fn get_all_books(
     }
 }
 
-#[tracing::instrument(skip(con), ret(level = Level::TRACE))]
+#[tracing::instrument(skip(db_pools), ret(level = Level::TRACE))]
 async fn get_book(
-    Extension(con): Extension<PgPool>,
+    Extension(db_pools): Extension<DatabasePools>,
     Path(id): Path<i32>,
 ) -> Result<Json<Book>, StatusCode> {
     // Metrics can be added to the tracing span directly
@@ -58,28 +58,29 @@ async fn get_book(
         &[opentelemetry::KeyValue::new("book_id", id.to_string())],
     );
 
-    if let Ok(book) = db::get_book(&con, id).await {
-        Ok(Json(book))
-    } else {
-        Err(StatusCode::NOT_FOUND)
+    let repo = BookRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
+    match repo.find_by_id(id).await {
+        Ok(Some(book)) => Ok(Json(book)),
+        Ok(None) => Err(StatusCode::NOT_FOUND),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
 }
 
-#[tracing::instrument(skip(con))]
+#[tracing::instrument(skip(db_pools))]
 async fn delete_book(
-    Extension(con): Extension<PgPool>,
+    Extension(db_pools): Extension<DatabasePools>,
     Path(id): Path<i32>,
 ) -> Result<(), StatusCode> {
-    if let Ok(_book) = db::delete_book(&con, id).await {
-        Ok(())
-    } else {
-        Err(StatusCode::NOT_FOUND)
+    let repo = BookRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
+    match repo.delete(id).await {
+        Ok(()) => Ok(()),
+        Err(_) => Err(StatusCode::NOT_FOUND),
     }
 }
 
-#[tracing::instrument(skip(con), fields(book.id = %id, book.author = %book_data.author, book.title = %book_data.title))]
+#[tracing::instrument(skip(db_pools), fields(book.id = %id, book.author = %book_data.author, book.title = %book_data.title))]
 async fn update_book(
-    Extension(con): Extension<PgPool>,
+    Extension(db_pools): Extension<DatabasePools>,
     Path(id): Path<i32>,
     Json(book_data): Json<BookCreateIn>,
 ) -> Result<Json<i32>, StatusCode> {
@@ -87,10 +88,11 @@ async fn update_book(
         id,
         author: book_data.author,
         title: book_data.title,
-        status: BookStatus::Available,
+        status: book_data.status.unwrap_or(BookStatus::Available),
     };
 
-    match db::update_book(&con, book).await {
+    let repo = BookRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
+    match repo.update(book).await {
         Ok(rows_affected) => {
             tracing::Span::current().record("db.rows_affected", rows_affected);
             Ok(Json(rows_affected))
@@ -102,30 +104,32 @@ async fn update_book(
     }
 }
 
-#[tracing::instrument(skip(con, producer))]
+#[tracing::instrument(skip(db_pools, producer))]
 async fn create_book(
-    Extension(con): Extension<PgPool>,
+    Extension(db_pools): Extension<DatabasePools>,
     Extension(producer): Extension<FutureProducer>,
     Json(book): Json<BookCreateIn>,
 ) -> Result<(StatusCode, Json<i32>), StatusCode> {
-    let status = book.status.unwrap_or(BookStatus::Available);
-    if let Ok(new_id) = db::create_book(&con, book.author, book.title, status).await {
-        queue_background_ingestion_task(&producer, new_id).await;
-        Ok((StatusCode::CREATED, Json(new_id)))
-    } else {
-        Err(StatusCode::INTERNAL_SERVER_ERROR)
+    let repo = BookRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
+    match repo.create(book).await {
+        Ok(new_id) => {
+            queue_background_ingestion_task(&producer, new_id).await;
+            Ok((StatusCode::CREATED, Json(new_id)))
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
 }
 
-#[tracing::instrument(skip(con), fields(num_books))]
+#[tracing::instrument(skip(db_pools), fields(num_books))]
 async fn bulk_create_books(
-    Extension(con): Extension<PgPool>,
+    Extension(db_pools): Extension<DatabasePools>,
     Json(payload): Json<Vec<BookCreateIn>>,
 ) -> Result<(StatusCode, Json<Vec<i32>>), StatusCode> {
     let num = payload.len() as i64;
     tracing::Span::current().record("num_books", num);
 
-    match db::bulk_insert_books(&con, &payload).await {
+    let repo = BookRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
+    match repo.bulk_create(&payload).await {
         Ok(ids) => Ok((StatusCode::CREATED, Json(ids))),
         Err(e) => {
             tracing::error!(error=%e, "bulk insert failed");

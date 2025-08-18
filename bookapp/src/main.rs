@@ -1,5 +1,6 @@
 mod book_details;
 mod book_ingestion;
+mod database;
 mod db;
 mod error_injection_middleware;
 mod reqwest_traced_client;
@@ -21,8 +22,7 @@ use sentry_tower::NewSentryLayer;
 use serde_json::{json, Value};
 use tokio::signal::unix::{signal, SignalKind};
 
-use crate::db::init_db;
-use sqlx::PgPool;
+use crate::database::DatabasePools;
 use tokio::task;
 use tracing::info;
 
@@ -33,10 +33,10 @@ async fn health() -> Json<Value> {
     }))
 }
 
-fn router(connection_pool: PgPool, producer: FutureProducer) -> Router {
+fn router(db_pools: DatabasePools, producer: FutureProducer) -> Router {
     // Create the ErrorInjectionConfigStore
     let error_injection_store = std::sync::Arc::new(
-        error_injection_middleware::PostgresErrorInjectionConfigStore::new(connection_pool.clone()),
+        error_injection_middleware::PostgresErrorInjectionConfigStore::new(db_pools.write_pool.clone()),
     )
         as std::sync::Arc<dyn error_injection_middleware::ErrorInjectionConfigStore>;
 
@@ -56,7 +56,7 @@ fn router(connection_pool: PgPool, producer: FutureProducer) -> Router {
             "/error-injection",
             error_injection_middleware::error_injection_service(error_injection_store.clone()),
         )
-        .layer(Extension(connection_pool))
+        .layer(Extension(db_pools))
         // Sentry Tower middleware for HTTP request tracking and error capture
         .layer(NewSentryLayer::new_from_top())
         // This layer creates a new Tracing span called "request" for each request,
@@ -97,7 +97,8 @@ async fn main() -> Result<()> {
 
     // Init db
     info!("Setting up Database");
-    let connection_pool = init_db().await?;
+    let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let db_pools = DatabasePools::single(&db_url, None).await?;
 
     // Create Kafka admin client
     let admin_client = topic_management::create_admin_client()?;
@@ -122,7 +123,7 @@ async fn main() -> Result<()> {
         let producer: FutureProducer = book_ingestion::create_producer()?;
 
         // Build the application router
-        let app = router(connection_pool, producer);
+        let app = router(db_pools, producer);
 
         // Start the server
         let listener = tokio::net::TcpListener::bind("0.0.0.0:8000").await?;

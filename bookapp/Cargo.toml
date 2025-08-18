@@ -5,6 +5,7 @@ edition = "2021"
 
 
 [dependencies]
+bookapp-dal = { path = "../bookapp-dal" }
 client = { path = "../client" }
 tower-otel-http-metrics = { version = "0.16.0", features = ["axum"] }
 

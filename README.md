@@ -6,7 +6,17 @@ The project is a multi-service "Book App" designed to showcase how to trace requ
 
 ## Architecture
 
-The system consists of two Rust services, a PostgreSQL database, and a Kafka message queue. All telemetry data is collected by the OpenTelemetry Collector and visualized using Grafana, Loki, Tempo, and Prometheus. Sentry is integrated for advanced error tracking and is correlated with the OpenTelemetry traces.
+The system consists of two Rust services, a separate data access layer (DAL), a PostgreSQL database, and a Kafka message queue. All telemetry data is collected by the OpenTelemetry Collector and visualized using Grafana, Loki, Tempo, and Prometheus. Sentry is integrated for advanced error tracking and is correlated with the OpenTelemetry traces.
+
+### Crate Structure
+
+This is a Cargo workspace with the following crates:
+
+- **`bookapp`**: Main REST API service (port 8000)
+- **`bookapp-dal`**: Data access layer with repository pattern and SQLx integration
+- **`backend`**: Secondary service for cross-service communication (port 8001)  
+- **`client`**: Generated API client using Progenitor for type-safe service calls
+- **`tests`**: Integration tests for end-to-end telemetry validation
 
 
 ### Service and Data Flow
@@ -86,7 +96,7 @@ This repository demonstrates several production-ready observability patterns:
 
 - **Distributed Tracing**: End-to-end tracing across multiple services and protocols:
     - **HTTP**: The `axum` web framework is instrumented to create and propagate trace context.
-    - **Database**: `sqlx` database calls are traced to monitor query performance.
+    - **Database**: `sqlx` database calls are traced to monitor query performance via the dedicated DAL crate.
     - **Generated Client**: An OpenAPI-generated progenitor client is instrumented to propagate context automatically.
     - **Message Queue (Kafka)**: Trace context is injected into Kafka message headers and used to create linked spans in the consumer, correctly modeling the asynchronous workflow.
 
@@ -274,9 +284,55 @@ uvx \
 
 ![img.png](./.github/tempo-drilldown.png)
 
+## Data Access Layer (DAL)
+
+The `bookapp-dal` crate implements a clean separation between business logic and data access using the repository pattern:
+
+### Features
+- **Repository Pattern**: Async traits for testability and abstraction
+- **Read/Write Pool Separation**: Supports dedicated read replicas and write masters
+- **Dependency Injection**: Pools are injected from application layer, enabling multiple domain-specific DALs
+- **Compile-time SQL Verification**: SQLx macros ensure type safety
+- **Custom Error Types**: Structured error handling with `DalError`
+- **Advanced Filtering**: Dynamic queries with multiple filter combinations
+- **Bulk Operations**: Efficient multi-row database operations
+
+### Usage Example
+```rust
+use bookapp_dal::{BookRepository, BookRepositoryImpl, BookCreateInput};
+
+// Initialize with read/write pool separation
+let db_pools = DatabasePools::new(
+    &write_url,
+    Some(&read_url),  // Optional read replica
+    None  // Use default config
+).await?;
+
+let repo = BookRepositoryImpl::new(
+    db_pools.write_pool, 
+    db_pools.read_pool
+);
+
+// Create a book (uses write pool)
+let input = BookCreateInput {
+    title: "Rust Programming".to_string(),
+    author: "Steve Klabnik".to_string(),
+    status: Some(BookStatus::Available),
+};
+let book_id = repo.create(input).await?;
+
+// Search with filters (uses read pool)
+let params = BookFilterParams {
+    status: Some(BookStatus::Available),
+    author_pattern: Some("Klabnik".to_string()),
+    ..Default::default()
+};
+let books = repo.find_by_filters(params).await?;
+```
+
 ## Migrations
 
-Migrations are run automatically by the bookapp container, or can manually be run using `sqlx-cli`:
+Migrations are stored in the DAL crate but executed by the application layer. They run automatically when the bookapp container starts:
 
 ```shell
 # Start database service
@@ -284,20 +340,24 @@ docker compose up -d db
 
 # Install sqlx-cli and run migrations
 cargo install sqlx-cli --no-default-features --features native-tls,postgres
-cd bookapp
+cd bookapp-dal
+export DATABASE_URL="postgres://postgres:password@localhost:5432/bookapp"
 sqlx migrate run
 sqlx migrate add <new migration>
 ```
 
 ## Compile Time Checked Postgres Queries
 
-The `sqlx` crate is used with the query! macro to provide compile time checked queries.
+The `sqlx` crate is used with the `query!` macro to provide compile time checked queries.
 
-If you change the queries, compile with `DATABASE_URL` set to a valid postgres connection string.
-Prepared metadata is stored in workspace level `.sqlx` directory.
+If you change the queries, compile the data access layer crate with `DATABASE_URL` set to a valid postgres
+connection string. Prepared metadata is stored in the DAL crate's `.sqlx` directory.
 
 ```shell
-cargo sqlx prepare --workspace
+# Prepare queries for the DAL crate
+cd bookapp-dal
+export DATABASE_URL="postgres://postgres:password@localhost:5432/bookapp"
+cargo sqlx prepare
 ```
 
 ## Testing
@@ -308,11 +368,12 @@ The project includes comprehensive integration tests that verify end-to-end tele
 # Run unit tests
 cargo test --package bookapp
 
+# Run DAL unit tests
+cargo test --package bookapp-dal
+
 # Run integration tests (requires running services)
 cargo test --package integration-tests
 
-# Use the test script for automated setup
-./run_tests.sh
 ```
 
 Integration tests verify:
@@ -320,4 +381,5 @@ Integration tests verify:
 - OpenTelemetry data collection in Tempo, Loki, and Prometheus
 - Error injection and telemetry generation
 - Cross-service trace correlation
+- Repository pattern functionality and database operations
 
