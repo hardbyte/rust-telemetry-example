@@ -85,7 +85,7 @@ pub trait ErrorInjectionConfigStore: Send + Sync + 'static {
 #[derive(Clone)]
 pub struct PostgresErrorInjectionConfigStore {
     /// The PostgreSQL connection pool.
-    pool: PgPool,
+    pool: Arc<PgPool>,
 }
 
 impl PostgresErrorInjectionConfigStore {
@@ -94,7 +94,7 @@ impl PostgresErrorInjectionConfigStore {
     /// # Arguments
     ///
     /// * `pool` - The PostgreSQL connection pool.
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: Arc<PgPool>) -> Self {
         Self { pool }
     }
 }
@@ -109,7 +109,7 @@ impl ErrorInjectionConfigStore for PostgresErrorInjectionConfigStore {
             LIMIT 1000
             "#,
         )
-        .fetch_all(&self.pool)
+        .fetch_all(self.pool.as_ref())
         .await?;
 
         Ok(configs)
@@ -128,7 +128,7 @@ impl ErrorInjectionConfigStore for PostgresErrorInjectionConfigStore {
             "#,
         )
         .bind(method)
-        .fetch_all(&self.pool)
+        .fetch_all(self.pool.as_ref())
         .await?;
 
         Ok(configs)
@@ -150,7 +150,7 @@ impl ErrorInjectionConfigStore for PostgresErrorInjectionConfigStore {
             .bind(input.error_rate)
             .bind(input.error_code)
             .bind(input.error_message)
-            .fetch_one(&self.pool)
+            .fetch_one(self.pool.as_ref())
             .await?;
 
         Ok(inserted_config)
@@ -175,7 +175,7 @@ impl ErrorInjectionConfigStore for PostgresErrorInjectionConfigStore {
             .bind(input.error_rate)
             .bind(input.error_code)
             .bind(input.error_message)
-            .fetch_one(&self.pool)
+            .fetch_one(self.pool.as_ref())
             .await?;
 
         Ok(updated_config)
@@ -188,7 +188,7 @@ impl ErrorInjectionConfigStore for PostgresErrorInjectionConfigStore {
             "#,
         )
         .bind(id)
-        .execute(&self.pool)
+        .execute(self.pool.as_ref())
         .await?;
 
         Ok(())

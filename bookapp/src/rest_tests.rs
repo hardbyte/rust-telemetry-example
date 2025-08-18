@@ -2,8 +2,9 @@
 mod tests {
 
     use crate::book_details::{BookDetailsProvider, StubBookDetailsProvider};
-    use crate::db::BookStatus;
-    use crate::{book_ingestion, db};
+    use crate::book_ingestion;
+    use crate::database::DatabasePools;
+    use crate::db::{BookCreateIn, BookRepository, BookRepositoryImpl, BookStatus};
     use axum::{
         body::Body,
         http::{Request, StatusCode},
@@ -20,12 +21,16 @@ mod tests {
     async fn setup_transactional_test_app(pool: PgPool) -> axum::Router {
         dotenv().ok();
         let producer: FutureProducer = book_ingestion::create_producer().unwrap();
+        let db_pools = DatabasePools {
+            write_pool: Arc::new(pool.clone()),
+            read_pool: Arc::new(pool),
+        };
         axum::Router::new()
             .nest_service("/books", crate::rest::book_service())
             .layer(Extension(
                 Arc::new(StubBookDetailsProvider) as Arc<dyn BookDetailsProvider>
             ))
-            .layer(Extension(pool))
+            .layer(Extension(db_pools))
             .layer(Extension(producer))
     }
 
@@ -59,14 +64,13 @@ mod tests {
     #[sqlx::test]
     async fn test_get_existing_book(pool: PgPool) {
         // Create a book to ensure it exists
-        let book_id = db::create_book(
-            &pool,
-            "Test Author".to_string(),
-            "Test Title".to_string(),
-            BookStatus::Available,
-        )
-        .await
-        .unwrap();
+        let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let input = BookCreateIn {
+            title: "Test Title".to_string(),
+            author: "Test Author".to_string(),
+            status: Some(BookStatus::Available),
+        };
+        let book_id = repo.create(input).await.unwrap();
 
         let app = setup_transactional_test_app(pool).await;
         let response = app
@@ -107,14 +111,13 @@ mod tests {
     #[sqlx::test]
     async fn test_update_existing_book(pool: PgPool) {
         // Create a book to update
-        let book_id = db::create_book(
-            &pool,
-            "Original Author".to_string(),
-            "Original Title".to_string(),
-            BookStatus::Available,
-        )
-        .await
-        .unwrap();
+        let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let input = BookCreateIn {
+            title: "Original Title".to_string(),
+            author: "Original Author".to_string(),
+            status: Some(BookStatus::Available),
+        };
+        let book_id = repo.create(input).await.unwrap();
 
         let app = setup_transactional_test_app(pool.clone()).await;
         let req = Request::builder()
@@ -130,7 +133,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         // Verify the book was actually updated
-        let updated_book = db::get_book(&pool, book_id).await.unwrap();
+        let updated_book = repo.find_by_id(book_id).await.unwrap().unwrap();
         assert_eq!(updated_book.author, "Updated Author");
         assert_eq!(updated_book.title, "Updated Title");
     }
@@ -156,14 +159,13 @@ mod tests {
 
     #[sqlx::test]
     async fn test_update_book_invalid_json(pool: PgPool) {
-        let book_id = db::create_book(
-            &pool,
-            "Author".to_string(),
-            "Title".to_string(),
-            BookStatus::Available,
-        )
-        .await
-        .unwrap();
+        let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let input = BookCreateIn {
+            title: "Title".to_string(),
+            author: "Author".to_string(),
+            status: Some(BookStatus::Available),
+        };
+        let book_id = repo.create(input).await.unwrap();
 
         let app = setup_transactional_test_app(pool).await;
         let req = Request::builder()
@@ -194,7 +196,8 @@ mod tests {
         let book_id: i32 = json.as_i64().unwrap() as i32;
 
         // Verify the book was actually created
-        let created_book = db::get_book(&pool, book_id).await.unwrap();
+        let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let created_book = repo.find_by_id(book_id).await.unwrap().unwrap();
         assert_eq!(created_book.author, "New Author");
         assert_eq!(created_book.title, "New Title");
         assert!(matches!(created_book.status, BookStatus::Available));
@@ -250,9 +253,10 @@ mod tests {
         assert_eq!(book_ids.len(), 2);
 
         // Verify both books were created
+        let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
         for book_id_value in book_ids {
             let book_id = book_id_value.as_i64().unwrap() as i32;
-            let book = db::get_book(&pool, book_id).await.unwrap();
+            let book = repo.find_by_id(book_id).await.unwrap().unwrap();
             assert!(["Author1", "Author2"].contains(&book.author.as_str()));
             assert!(["Title1", "Title2"].contains(&book.title.as_str()));
         }
@@ -293,14 +297,13 @@ mod tests {
     #[sqlx::test]
     async fn test_delete_existing_book(pool: PgPool) {
         // Create a book to delete
-        let book_id = db::create_book(
-            &pool,
-            "To Delete Author".to_string(),
-            "To Delete Title".to_string(),
-            BookStatus::Available,
-        )
-        .await
-        .unwrap();
+        let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let input = BookCreateIn {
+            title: "To Delete Title".to_string(),
+            author: "To Delete Author".to_string(),
+            status: Some(BookStatus::Available),
+        };
+        let book_id = repo.create(input).await.unwrap();
 
         let app = setup_transactional_test_app(pool.clone()).await;
         let req = Request::builder()
@@ -331,8 +334,7 @@ mod tests {
             .unwrap();
         let response = app.oneshot(req).await.unwrap();
 
-        // The delete_book handler returns OK even if the book doesn't exist
-        // because it doesn't check if the deletion actually affected any rows
-        assert_eq!(response.status(), StatusCode::OK);
+        // The delete_book handler should return NOT_FOUND if the book doesn't exist
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 }
