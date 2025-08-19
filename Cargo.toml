@@ -4,6 +4,7 @@ members = [
     "client",
     "bookapp",
     "bookapp-dal",
+    "backend",
     "tests",
 ]
 

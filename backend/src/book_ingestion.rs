@@ -1,0 +1,201 @@
+use anyhow::Result;
+use bookapp_dal::BookRepositoryImpl;
+use opentelemetry::global;
+use opentelemetry::propagation::Extractor;
+use opentelemetry::trace::TraceContextExt;
+use rdkafka::{
+    config::ClientConfig,
+    consumer::{CommitMode, Consumer, StreamConsumer},
+    message::{Headers, Message},
+};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tracing::{error, info};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BookIngestionMessage {
+    pub book_id: i32,
+    // other fields if necessary
+}
+
+struct HeaderExtractor<'a> {
+    headers: Option<&'a rdkafka::message::BorrowedHeaders>,
+}
+
+impl Extractor for HeaderExtractor<'_> {
+    fn get(&self, key: &str) -> Option<&str> {
+        self.headers.and_then(|headers| {
+            headers.iter().find_map(|header| {
+                if header.key.eq_ignore_ascii_case(key) {
+                    header.value.and_then(|v| std::str::from_utf8(v).ok())
+                } else {
+                    None
+                }
+            })
+        })
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        self.headers
+            .map_or_else(Vec::new, |headers| headers.iter().map(|h| h.key).collect())
+    }
+}
+
+#[tracing::instrument(skip(_book_repository), fields(book_id))]
+async fn background_process_new_book(
+    book_id: i32,
+    _book_repository: Arc<BookRepositoryImpl>,
+) -> Result<()> {
+    info!(
+        book_id = book_id,
+        "Starting background processing for new book"
+    );
+
+    // Simulate some background processing
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+    // Example: Update book metadata or status
+    // In a real application, this might:
+    // - Fetch additional metadata from external APIs
+    // - Perform content analysis
+    // - Generate thumbnails or previews
+    // - Send notifications to subscribers
+    // - Update search indexes
+
+    info!(
+        book_id = book_id,
+        "Completed background processing for new book"
+    );
+
+    Ok(())
+}
+
+pub fn create_consumer() -> Result<StreamConsumer> {
+    let kafka_broker_url =
+        std::env::var("KAFKA_BROKER_URL").unwrap_or_else(|_| "kafka:9092".to_string());
+    let kafka_group_id =
+        std::env::var("KAFKA_GROUP_ID").unwrap_or_else(|_| "backend_consumer_group".to_string());
+
+    let consumer: StreamConsumer = ClientConfig::new()
+        .set("bootstrap.servers", &kafka_broker_url)
+        .set("group.id", &kafka_group_id)
+        .set("auto.offset.reset", "earliest")
+        .set("session.timeout.ms", "6000")
+        .set("enable.auto.commit", "false")
+        .create()
+        .map_err(|e| anyhow::anyhow!("Consumer creation failed: {:?}", e))?;
+
+    Ok(consumer)
+}
+
+pub async fn run_consumer(book_repository: Arc<BookRepositoryImpl>) -> Result<()> {
+    let consumer = create_consumer()?;
+
+    consumer.subscribe(&["book_ingestion"])?;
+
+    info!("Backend Kafka consumer started, waiting for messages...");
+
+    loop {
+        match consumer.recv().await {
+            Err(e) => error!("Kafka error: {}", e),
+            Ok(m) => {
+                let payload = match m.payload_view::<str>() {
+                    None => "",
+                    Some(Ok(s)) => s,
+                    Some(Err(e)) => {
+                        error!(
+                            error = format!("{e:#}"),
+                            "Error while deserializing payload"
+                        );
+                        continue;
+                    }
+                };
+
+                // Create a new root span for this message processing
+                let span = tracing::info_span!(
+                    "book_ingestion_processing",
+                    "otel.kind" = "Consumer",
+                    "messaging.system" = "kafka",
+                    "messaging.destination" = "book_ingestion"
+                );
+
+                // Extract tracing context from headers
+                let headers = m.headers();
+                let extractor = HeaderExtractor { headers };
+
+                // Extract the parent OpenTelemetry context
+                let parent_cx =
+                    global::get_text_map_propagator(|propagator| propagator.extract(&extractor));
+
+                // Extract the linked span context from the otel context
+                let linked_span_context = parent_cx.span().span_context().clone();
+                tracing::debug!(
+                    trace_id = %linked_span_context.trace_id(),
+                    span_id = %linked_span_context.span_id(),
+                    "Extracting context from linked span"
+                );
+
+                // Link the extracted span context to our current root span
+                // This creates a linked span rather than a parent-child relationship
+                // which is appropriate for async message processing
+                let link_attributes = vec![
+                    opentelemetry::KeyValue::new("link.type", "follows_from"),
+                    opentelemetry::KeyValue::new("messaging.operation", "process"),
+                ];
+                span.add_link_with_attributes(linked_span_context, link_attributes);
+
+                let processing_result = span
+                    .in_scope(|| async {
+                        // Deserialize and process the message
+                        if let Ok(book_message) =
+                            serde_json::from_str::<BookIngestionMessage>(payload)
+                        {
+                            info!(
+                                book_id = book_message.book_id,
+                                partition = m.partition(),
+                                offset = m.offset(),
+                                "Processing book ingestion message in backend"
+                            );
+
+                            // Process the message with the repository
+                            if let Err(e) = background_process_new_book(
+                                book_message.book_id,
+                                book_repository.clone(),
+                            )
+                            .await
+                            {
+                                error!(
+                                    book_id = book_message.book_id,
+                                    error = %e,
+                                    "Failed to process book ingestion message"
+                                );
+                                return Err(e);
+                            }
+                        } else {
+                            error!("Failed to deserialize message payload");
+                            return Err(anyhow::anyhow!("Failed to deserialize message payload"));
+                        }
+                        Ok(())
+                    })
+                    .await;
+
+                // Commit the message offset only if processing succeeded
+                match processing_result {
+                    Ok(()) => {
+                        if let Err(e) = consumer.commit_message(&m, CommitMode::Async) {
+                            error!("Failed to commit message offset: {:?}", e);
+                        }
+                    }
+                    Err(e) => {
+                        error!("Message processing failed, not committing offset: {:?}", e);
+                        // In a production system, you might want to:
+                        // - Send to a dead letter queue
+                        // - Retry with exponential backoff
+                        // - Alert monitoring systems
+                    }
+                }
+            }
+        }
+    }
+}

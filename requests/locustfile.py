@@ -25,6 +25,7 @@ except ImportError:
     print("opentelemetry is not installed. Tracing will be disabled.")
     trace = None
 
+import os
 import json
 import string
 import random
@@ -32,12 +33,24 @@ import random
 def init_telemetry(
         service_name: str = "load-tester-client"
 ):
+    if trace is None:
+        return
+
+    # Allow service name override from environment
+    service_name = os.environ.get("OTEL_SERVICE_NAME", os.environ.get("LOCUST_SERVICE_NAME", service_name))
+
     resource = Resource.create(
         {SERVICE_NAME: service_name}
     )
     provider = TracerProvider(resource=resource)
 
-    span_exporter = OTLPSpanExporter()
+    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+    insecure_env = os.environ.get("OTEL_EXPORTER_OTLP_INSECURE")
+    if insecure_env is not None:
+        insecure = insecure_env.lower() in ("1", "true", "t", "yes", "y")
+    else:
+        insecure = endpoint.startswith("http://")
+    span_exporter = OTLPSpanExporter(endpoint=endpoint, insecure=insecure)
     span_processor = BatchSpanProcessor(span_exporter)
     # add to the tracer
     provider.add_span_processor(span_processor)
@@ -55,7 +68,7 @@ def init_telemetry(
 
 
 try:
-    init_telemetry('load-tester')
+    init_telemetry(os.environ.get('OTEL_SERVICE_NAME', os.environ.get('LOCUST_SERVICE_NAME', 'load-tester')))
 except Exception as e:
     print(f"Failed to initialize telemetry: {e}")
 
@@ -102,8 +115,7 @@ class BookTasks(TaskSet):
         if random.random() > 0.5:
             payload["extra-data"] = random.randbytes(1000).hex()
         url = "/books/add"
-        headers = {"Content-Type": "application/json"}
-        with self.client.post(url, data=json.dumps(payload), headers=headers, catch_response=True) as response:
+        with self.client.post(url, json=payload, catch_response=True) as response:
             if response.status_code == 200 or response.status_code == 201:
                 # Assuming the API returns the created book's ID in the response JSON
                 try:
@@ -133,7 +145,7 @@ class BookTasks(TaskSet):
         with self.client.post("/books/bulk_add",
                               json=payload,
                               catch_response=True) as response:
-            if response.status_code == 200:
+            if response.status_code in (200, 201):
                 try:
                     ids = response.json()
                     if isinstance(ids, list):
@@ -170,7 +182,7 @@ class BookUser(HttpUser):
     # Wait time between tasks (1 to 5 seconds)
     wait_time = between(1, 5)
     # Set the host to the API's base URL
-    host = "http://localhost:8000"
+    host = os.environ.get("LOCUST_HOST", "http://localhost:8000")
 
     def on_start(self):
         """Executed when a simulated user starts."""
@@ -179,5 +191,3 @@ class BookUser(HttpUser):
     def on_stop(self):
         """Executed when a simulated user stops."""
         pass  # You can add any teardown logic here if needed
-
-

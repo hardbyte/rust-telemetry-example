@@ -15,7 +15,7 @@ services:
       SENTRY_RELEASE: "bookapp@1.0.0"
     ports:
       - "8000:8000"
-      - "6669:6669"
+      - "6669:6669"  # Console subscriber port for main app
     depends_on:
       kafka:
         condition: service_healthy
@@ -24,20 +24,21 @@ services:
 
   backend:
     profiles: [default, ci]
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
     environment:
       DATABASE_URL: "postgres://postgres:password@db:5432/bookapp"
       OTEL_SERVICE_NAME: "backend"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://telemetry:4317
       TRACE_SAMPLE_PROBABILITY: 1.0
       KAFKA_BROKER_URL: "kafka:9092"
-      ENABLE_KAFKA_CONSUMER: "true"
-      ENABLE_KAFKA_PRODUCER: "true"
+      KAFKA_GROUP_ID: "backend_consumer_group"
       SENTRY_DSN: ${SENTRY_DSN}
       SENTRY_ENVIRONMENT: "development"
       SENTRY_RELEASE: "backend@1.0.0"
     ports:
-      - "8001:8000"
+      - "6670:6670"  # Console subscriber port for backend
     depends_on:
       app:
         condition: service_started
