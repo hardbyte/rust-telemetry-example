@@ -1,4 +1,5 @@
 mod book_details;
+#[allow(dead_code)]
 mod book_ingestion;
 mod database;
 mod db;
@@ -23,7 +24,7 @@ use serde_json::{json, Value};
 use tokio::signal::unix::{signal, SignalKind};
 
 use crate::database::DatabasePools;
-use tokio::task;
+
 use tracing::info;
 
 async fn health() -> Json<Value> {
@@ -89,8 +90,6 @@ fn router(db_pools: DatabasePools, producer: FutureProducer) -> Router {
 async fn main() -> Result<()> {
     // Load env vars
     dotenv::dotenv().ok();
-    let enable_kafka_consumer =
-        std::env::var("ENABLE_KAFKA_CONSUMER").unwrap_or_else(|_| "false".to_string()) == "true";
     let enable_kafka_producer =
         std::env::var("ENABLE_KAFKA_PRODUCER").unwrap_or_else(|_| "false".to_string()) == "true";
 
@@ -107,16 +106,6 @@ async fn main() -> Result<()> {
 
     // Ensure the topic exists
     topic_management::ensure_topic_exists(&admin_client, "book_ingestion").await?;
-
-    if enable_kafka_consumer {
-        // Start Kafka consumer in a background task
-        info!("Starting Kafka consumer");
-        task::spawn(async move {
-            if let Err(e) = book_ingestion::run_consumer().await {
-                tracing::error!("Kafka consumer error: {:?}", e);
-            }
-        });
-    }
 
     if enable_kafka_producer {
         info!("Setting up Kafka Producer");

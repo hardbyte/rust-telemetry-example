@@ -12,9 +12,9 @@ The system consists of two Rust services, a separate data access layer (DAL), a 
 
 This is a Cargo workspace with the following crates:
 
-- **`bookapp`**: Main REST API service (port 8000)
+- **`bookapp`**: Main REST API service (port 8000) - handles HTTP requests, produces Kafka messages
 - **`bookapp-dal`**: Data access layer with repository pattern and SQLx integration
-- **`backend`**: Secondary service for cross-service communication (port 8001)  
+- **`backend`**: Async message processor and background task scheduler - consumes Kafka messages, enriches data, runs scheduled jobs (no public HTTP port; console-subscriber on 6670; graceful shutdown on SIGINT/SIGTERM)
 - **`client`**: Generated API client using Progenitor for type-safe service calls
 - **`tests`**: Integration tests for end-to-end telemetry validation
 
@@ -43,11 +43,11 @@ graph LR
   locust -- "Generates Load" --> app
 
   app -- "1. Writes to DB" --> db
-  app -- "2. HTTP API Call" --> backend
-  app -- "3. Produces Message" --> kafka
+  app -- "2. Produces Message" --> kafka
 
   kafka -- "Delivers Message" --> backend
   backend -- "Processes & Reads from DB" --> db
+  backend -- "Scheduled Tasks" --> db
 
   classDef services fill:#f9f,stroke:#333,stroke-width:2px;
   class app,backend,kafka,db services;
@@ -271,12 +271,15 @@ Open Grafana at localhost:3000 and login with `admin:admin`
 The provided Locust script is also instrumented with OpenTelemetry.
 
 ```shell
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 \
+LOCUST_HOST=http://localhost:8000 \
 uvx \
   --with 'opentelemetry-sdk' \
   --with "opentelemetry-exporter-otlp-proto-grpc >=1.24.0" \
   --with "opentelemetry-instrumentation-requests==0.46b0" \
   --with "opentelemetry-instrumentation-urllib3==0.46b0" \
-  locust -f requests/locustfile.py
+  --with "locust" \
+  locust -f requests/locustfile.py --headless -u 50 -r 5 -t 1m --stop-timeout 5 --loglevel INFO
 ```
 
 
