@@ -718,7 +718,7 @@
                   {
                     "targetBlank": true,
                     "title": "View traces in Tempo",
-                    "url": "http://localhost:3000/explore?orgId=1&left=%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22query%22:%22%7Bresource.service.name%3D%5C%22${__data.fields.service_name}%5C%22%20%26%26%20span%3Aname%3D%5C%22${__data.fields.span_name}%5C%22%7D%22,%22queryType%22:%22traceql%22%7D%5D,%22range%22:%7B%22from%22:%22now-1h%22,%22to%22:%22now%22%7D%7D"
+                    "url": "http://localhost:3000/explore?orgId=1&left=%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22query%22:%22%7Bresource.service.name%3D%5C%22${__data.fields.service}%5C%22%20%26%26%20span%3Aname%3D%5C%22${__data.fields.span_name}%5C%22%7D%22,%22queryType%22:%22traceql%22%7D%5D,%22range%22:%7B%22from%22:%22now-1h%22,%22to%22:%22now%22%7D%7D"
                   }
                 ]
               }
@@ -753,7 +753,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "topk(10, sum(rate(traces_spanmetrics_calls_total{status_code=\"STATUS_CODE_ERROR\"}[5m])) by (span_name, service_name))",
+          "expr": "topk(10, sum(rate(traces_spanmetrics_calls_total{status_code=\"STATUS_CODE_ERROR\"}[5m])) by (span_name, service))",
           "format": "table",
           "range": true,
           "refId": "A"
@@ -820,7 +820,7 @@
                   {
                     "targetBlank": true,
                     "title": "View traces in Tempo",
-                    "url": "http://localhost:3000/explore?orgId=1&left=%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22query%22:%22%7Bresource.service.name%3D%5C%22${__data.fields.service_name}%5C%22%20%26%26%20span%3Aname%3D%5C%22${__data.fields.span_name}%5C%22%7D%22,%22queryType%22:%22traceql%22%7D%5D,%22range%22:%7B%22from%22:%22now-1h%22,%22to%22:%22now%22%7D%7D"
+                    "url": "http://localhost:3000/explore?orgId=1&left=%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22query%22:%22%7Bresource.service.name%3D%5C%22${__data.fields.service}%5C%22%20%26%26%20span%3Aname%3D%5C%22${__data.fields.span_name}%5C%22%7D%22,%22queryType%22:%22traceql%22%7D%5D,%22range%22:%7B%22from%22:%22now-1h%22,%22to%22:%22now%22%7D%7D"
                   }
                 ]
               }
@@ -855,7 +855,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "topk(10, histogram_quantile(0.99, sum(rate(traces_spanmetrics_latency_bucket[5m])) by (span_name, service_name, le)))",
+          "expr": "topk(10, histogram_quantile(0.99, sum(rate(traces_spanmetrics_latency_bucket[5m])) by (span_name, service, le)))",
           "format": "table",
           "range": true,
           "refId": "A"
@@ -922,7 +922,7 @@
                   {
                     "targetBlank": true,
                     "title": "View traces in Tempo",
-                    "url": "http://localhost:3000/explore?orgId=1&left=%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22query%22:%22%7Bresource.service.name%3D%5C%22${__data.fields.service_name}%5C%22%20%26%26%20span%3Aname%3D%5C%22${__data.fields.span_name}%5C%22%7D%22,%22queryType%22:%22traceql%22%7D%5D,%22range%22:%7B%22from%22:%22now-1h%22,%22to%22:%22now%22%7D%7D"
+                    "url": "http://localhost:3000/explore?orgId=1&left=%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22query%22:%22%7Bresource.service.name%3D%5C%22${__data.fields.service}%5C%22%20%26%26%20span%3Aname%3D%5C%22${__data.fields.span_name}%5C%22%7D%22,%22queryType%22:%22traceql%22%7D%5D,%22range%22:%7B%22from%22:%22now-1h%22,%22to%22:%22now%22%7D%7D"
                   }
                 ]
               }
@@ -957,7 +957,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "topk(10, histogram_quantile(0.99, sum(rate(traces_spanmetrics_latency_bucket{span_name=~\".*(_db|_in_db|sql|query|SELECT|INSERT|UPDATE|DELETE).*\"}[5m])) by (span_name, service_name, le)))",
+          "expr": "topk(10, histogram_quantile(0.99, sum(rate(traces_spanmetrics_latency_bucket{span_name=~\".*(_db|_in_db|sql|query|SELECT|INSERT|UPDATE|DELETE).*\"}[5m])) by (span_name, service, le)))",
           "format": "table",
           "range": true,
           "refId": "A"
@@ -1265,7 +1265,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(rate(traces_spanmetrics_calls_total{span_name=~\".*event.*\"}[5m])) by (service_name)",
+          "expr": "sum(rate(traces_spanmetrics_calls_total{span_name=~\".*event.*\"}[5m])) by (service)",
           "range": true,
           "refId": "A"
         }
@@ -1364,7 +1364,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(rate(traces_spanmetrics_calls_total{span_name=~\".*db.*\"}[5m])) by (service_name)",
+          "expr": "sum(rate(traces_spanmetrics_calls_total{span_name=~\".*db.*\"}[5m])) by (service)",
           "range": true,
           "refId": "A"
         }
