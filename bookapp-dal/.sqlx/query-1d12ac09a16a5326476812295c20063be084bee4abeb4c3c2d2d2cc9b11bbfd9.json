@@ -1,0 +1,63 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                w.id                         as \"id!\",\n                w.id                         as \"work_id!\",\n                w.title                      as \"work_title!\",\n                a.id                         as \"primary_author_id!\",\n                a.name                       as \"primary_author_name!\",\n                'available'::book_status     as \"status!: BookStatus\"\n            FROM works w\n            JOIN work_authors wa\n              ON wa.work_id = w.id\n             AND wa.primary_author = true\n            JOIN authors a\n              ON a.id = wa.author_id\n            WHERE w.id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "work_id!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "work_title!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "primary_author_id!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "primary_author_name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "status!: BookStatus",
+        "type_info": {
+          "Custom": {
+            "name": "book_status",
+            "kind": {
+              "Enum": [
+                "available",
+                "borrowed",
+                "lost"
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "1d12ac09a16a5326476812295c20063be084bee4abeb4c3c2d2d2cc9b11bbfd9"
+}

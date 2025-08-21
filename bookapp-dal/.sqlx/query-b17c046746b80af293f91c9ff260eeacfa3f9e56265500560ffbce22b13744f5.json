@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO series_works_association (series_id, work_id, primary_work, order_id)\n            VALUES ($1, $2, $3, $4)\n            ON CONFLICT (series_id, work_id) DO UPDATE\n            SET primary_work = EXCLUDED.primary_work,\n                order_id = EXCLUDED.order_id\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Bool",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b17c046746b80af293f91c9ff260eeacfa3f9e56265500560ffbce22b13744f5"
+}

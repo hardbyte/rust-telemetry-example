@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM series_works_association\n            WHERE series_id = $1 AND work_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "47229496c7383b44f699cfe87fc394a6acbe7fc99e3d179695ba7f8a9139a74b"
+}

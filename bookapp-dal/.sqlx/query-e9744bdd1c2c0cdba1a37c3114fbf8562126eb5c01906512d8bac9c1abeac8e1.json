@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE events\n            SET publish_attempts = publish_attempts + 1,\n                publish_error = $2\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e9744bdd1c2c0cdba1a37c3114fbf8562126eb5c01906512d8bac9c1abeac8e1"
+}
