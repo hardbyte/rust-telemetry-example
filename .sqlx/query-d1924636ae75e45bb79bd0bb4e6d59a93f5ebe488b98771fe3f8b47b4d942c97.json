@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO events\n                (aggregate_type, aggregate_id, event_type, payload, headers, trace_id, span_id, source_service, version)\n            VALUES\n                ($1,             $2,           $3,         $4,      $5,      $6,       $7,      $8,             $9)\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Jsonb",
+        "Text",
+        "Text",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d1924636ae75e45bb79bd0bb4e6d59a93f5ebe488b98771fe3f8b47b4d942c97"
+}

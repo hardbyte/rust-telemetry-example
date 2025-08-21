@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE works\n            SET\n                title = $2,\n                original_language = $3,\n                description = $4,\n                publication_year = $5\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text",
+        "Text",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f4bf334af7cd058ee919f7afa4963dc32421109041a63996a66233971915799c"
+}
