@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                id,\n                work_id,\n                isbn,\n                title,\n                publisher,\n                publication_date,\n                \"language\",\n                page_count,\n                format,\n                created_at,\n                updated_at\n            FROM editions\n            WHERE work_id = $1\n            ORDER BY publication_date NULLS LAST, id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "work_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "isbn",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "publisher",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "publication_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 6,
+        "name": "language",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "page_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "format",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "353583845c2fd84d589264e4fa285711f06e926747e96d6a1595680fa5a53fb4"
+}

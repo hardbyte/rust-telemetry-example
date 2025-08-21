@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO work_authors (work_id, author_id, role, primary_author, ord)\n            VALUES ($1, $2, 'Author', true, 1)\n            ON CONFLICT (work_id, author_id)\n            DO UPDATE SET primary_author = true, ord = 1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a3d372fd939f79b731426f47d070acd8ddad4641c85181280bfeb1efec444bb2"
+}

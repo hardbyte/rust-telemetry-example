@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                series_id,\n                work_id,\n                primary_work,\n                order_id,\n                created_at,\n                updated_at\n            FROM series_works_association\n            WHERE series_id = $1\n            ORDER BY order_id NULLS LAST, work_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "series_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "work_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "primary_work",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "order_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "502d52a2c079873672a4f379846a4e7ef76747e82106a867c43bff035c070032"
+}
