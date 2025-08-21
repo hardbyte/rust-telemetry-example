@@ -1,0 +1,21 @@
+ARG RUST_VERSION=1.84
+
+FROM rust:${RUST_VERSION}-bookworm AS builder
+WORKDIR /usr/src/app
+ENV SQLX_OFFLINE=true
+
+# Copy the full source and build the backend in release mode
+COPY . .
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/src/app/target \
+    cargo build --release --package backend && \
+    mv /usr/src/app/target/release/backend /backend
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /backend /usr/local/bin/backend
+
+ENV RUST_LOG="info,sqlx=info,backend=debug"
+CMD ["backend"]
