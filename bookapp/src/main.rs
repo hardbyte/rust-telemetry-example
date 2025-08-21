@@ -4,6 +4,8 @@ mod book_ingestion;
 mod database;
 mod db;
 mod error_injection_middleware;
+#[cfg(test)]
+mod observability_tests;
 mod reqwest_traced_client;
 mod rest;
 #[cfg(test)]
@@ -35,16 +37,19 @@ async fn health() -> Json<Value> {
 }
 
 fn router(db_pools: DatabasePools, producer: FutureProducer) -> Router {
-    // Create the ErrorInjectionConfigStore
-    let error_injection_store = std::sync::Arc::new(
+    // Create the ErrorInjectionConfigStore with caching
+    let postgres_store = std::sync::Arc::new(
         error_injection_middleware::PostgresErrorInjectionConfigStore::new(
             db_pools.write_pool.clone(),
         ),
-    )
-        as std::sync::Arc<dyn error_injection_middleware::ErrorInjectionConfigStore>;
+    ) as std::sync::Arc<dyn error_injection_middleware::ErrorInjectionConfigStore>;
+    
+    let error_injection_store = std::sync::Arc::new(
+        error_injection_middleware::CachedErrorInjectionConfigStore::new(postgres_store),
+    ) as std::sync::Arc<dyn error_injection_middleware::ErrorInjectionConfigStore>;
 
     Router::new()
-        .nest_service("/books", rest::book_service())
+        .merge(rest::api_router())
         .layer(Extension(
             Arc::new(RemoteBookDetailsProvider) as Arc<dyn BookDetailsProvider>
         ))
@@ -99,7 +104,13 @@ async fn main() -> Result<()> {
     // Init db
     info!("Setting up Database");
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    let db_pools = DatabasePools::single(&db_url, None).await?;
+    // Increase pool size for development with multiple services
+    let config = database::DatabaseConfig {
+        max_connections: 20, // Increased from default 10
+        min_connections: 5,  // Increased from default 2
+        ..Default::default()
+    };
+    let db_pools = DatabasePools::single(&db_url, Some(config)).await?;
 
     // Create Kafka admin client
     let admin_client = topic_management::create_admin_client()?;

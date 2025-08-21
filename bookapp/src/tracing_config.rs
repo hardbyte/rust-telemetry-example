@@ -180,6 +180,7 @@ pub fn init_tracing() -> (
             .add_directive("tonic=error".parse().unwrap())
             .add_directive("reqwest=error".parse().unwrap());
 
+    // Configure the OpenTelemetry log layer with proper message formatting
     let otel_log_layer =
         opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&log_provider)
             .with_filter(otel_log_filter);

@@ -66,6 +66,49 @@ receivers:
         method: "GET"
     collection_interval: 10s
 
+  # Backend service health via Docker container monitoring
+  docker_stats/backend:
+    collection_interval: 10s
+    timeout: 20s
+    container_labels_to_metric_labels:
+      com.docker.compose.service: service_name
+    excluded_images: 
+      - telemetry  # Exclude telemetry container
+
+  hostmetrics:
+    collection_interval: 10s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+          system.cpu.time:
+            enabled: true
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
+          system.memory.usage:
+            enabled: true
+      network:
+        metrics:
+          system.network.io:
+            enabled: true
+          system.network.packets:
+            enabled: true
+      disk:
+        metrics:
+          system.disk.io:
+            enabled: true
+          system.disk.operations:
+            enabled: true
+      filesystem:
+        metrics:
+          system.filesystem.utilization:
+            enabled: true
+          system.filesystem.usage:
+            enabled: true
+
 processors:
   resourcedetection:
     detectors: [ env, system ]
@@ -85,20 +128,6 @@ processors:
         action: "insert"
         value: "otel-collector"
 
-  attributes/logs:
-    # https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/processor/attributesprocessor/README.md
-    actions:
-      - key: "name"
-        pattern: ^(?:event\s+)?(?P<file_path>[^\s:]+):(?P<line_number>\d+)
-        action: extract
-      - key: line_number
-        action: convert
-        converted_type: int
-      - key: "name-copied"
-        action: "upsert"
-        from_attribute: name
-      - key: "name"
-        action: "delete"
 
 
   transform/logs:
@@ -121,6 +150,9 @@ processors:
           - set(attributes["hostname"], resource.attributes["container.hostname"])
           - set(attributes["container_name"], resource.attributes["container.name"])
           - set(attributes["image_name"], resource.attributes["container.image.name"])
+          # Add service health indicators
+          - set(attributes["service_health"], "up") where resource.attributes["container.name"] == "rust-telemetry-example-app-1"
+          - set(attributes["service_health"], "up") where resource.attributes["container.name"] == "rust-telemetry-example-backend-1"
 
   transform/metrics/kafka:
     error_mode: ignore
@@ -208,6 +240,7 @@ service:
 #        - count
         - exceptions
         - httpcheck/app
+        - hostmetrics
       processors: [memory_limiter, batch]
       exporters: [otlphttp/metrics]
 
@@ -224,11 +257,11 @@ service:
       #exporters: [otlphttp/metrics, debug/metrics]
 
     metrics/docker:
-      receivers: [docker_stats]
+      receivers: [docker_stats, docker_stats/backend]
       processors: [memory_limiter,transform/metrics/docker_stats,batch]
       exporters: [otlphttp/metrics]
 
     logs:
       receivers: [otlp]
-      processors: [memory_limiter,resourcedetection,resource/logs,transform/logs,attributes/logs,batch]
+      processors: [memory_limiter,resourcedetection,resource/logs,transform/logs,batch]
       exporters: [otlphttp/logs, count]

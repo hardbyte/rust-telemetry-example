@@ -1,4 +1,140 @@
 use anyhow::Result;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::watch;
+use tokio::time::sleep;
+use tracing::{debug, error, info, instrument, warn};
+
+use rdkafka::producer::{FutureProducer, FutureRecord};
+use rdkafka::Message;
+
+use bookapp_dal::repository::EventRepositoryImpl;
+use bookapp_dal::{Event, PgPool};
+
+/// Configuration for the outbox publisher worker
+#[derive(Clone, Debug)]
+pub struct OutboxPublisherConfig {
+    pub default_topic: Option<String>,
+    pub batch_size: i64,
+    pub poll_interval: Duration,
+}
+
+/// Periodically scans the events outbox table for unpublished events and publishes them to Kafka.
+/// Marks events as published or failed accordingly.
+#[instrument(skip_all, fields(batch_size = %config.batch_size))]
+pub async fn start_outbox_publisher(
+    pool: Arc<PgPool>,
+    producer: FutureProducer,
+    config: OutboxPublisherConfig,
+    mut shutdown: watch::Receiver<bool>,
+) -> Result<()> {
+    let repo = EventRepositoryImpl::single_pool(pool.clone());
+
+    info!(
+        "Starting outbox publisher with interval {:?}",
+        config.poll_interval
+    );
+    loop {
+        if *shutdown.borrow() {
+            info!("Outbox publisher received shutdown signal");
+            break;
+        }
+
+        match publish_unpublished_events(&repo, pool.as_ref(), &producer, &config).await {
+            Ok(count) => {
+                if count == 0 {
+                    // Nothing to do, sleep the full interval
+                    sleep(config.poll_interval).await;
+                } else {
+                    // If we published something, yield briefly before next scan
+                    tokio::task::yield_now().await;
+                }
+            }
+            Err(err) => {
+                error!(error = %err, "Outbox publish cycle failed");
+                sleep(config.poll_interval).await;
+            }
+        }
+    }
+
+    info!("Outbox publisher stopped");
+    Ok(())
+}
+
+#[instrument(skip_all)]
+async fn publish_unpublished_events(
+    repo: &EventRepositoryImpl,
+    pool: &PgPool,
+    producer: &FutureProducer,
+    config: &OutboxPublisherConfig,
+) -> Result<usize> {
+    // We don't filter by topic here to allow per-event topic overrides in DB (event.topic)
+    let events = repo
+        .list_unpublished_with(pool, None, config.batch_size)
+        .await?;
+
+    if events.is_empty() {
+        debug!("No unpublished events found");
+        return Ok(0);
+    }
+
+    debug!(count = events.len(), "Found unpublished events");
+    let mut published_count = 0usize;
+
+    for ev in events {
+        // Determine topic: event.topic overrides default
+        let topic = match (&ev.topic, &config.default_topic) {
+            (Some(t), _) if !t.is_empty() => t.clone(),
+            (None, Some(t)) if !t.is_empty() => t.clone(),
+            _ => {
+                warn!(event_id = ev.id, "No topic configured for event; skipping");
+                // Mark as failed so we don't spin forever; alternatively leave it for manual intervention
+                let _ = repo
+                    .mark_publish_failed_with(pool, ev.id, "no topic configured")
+                    .await;
+                continue;
+            }
+        };
+
+        match publish_event(producer, &topic, &ev).await {
+            Ok(()) => {
+                let _ = repo.mark_published_with(pool, ev.id).await;
+                published_count += 1;
+            }
+            Err(e) => {
+                error!(event_id = ev.id, error = %e, "Failed to publish outbox event");
+                let _ = repo
+                    .mark_publish_failed_with(pool, ev.id, &format!("{e:#}"))
+                    .await;
+            }
+        }
+    }
+
+    Ok(published_count)
+}
+
+#[instrument(skip_all, fields(topic = %topic, event.id = event.id))]
+async fn publish_event(producer: &FutureProducer, topic: &str, event: &Event) -> Result<()> {
+    // Use aggregate_id as key for ordering/partition affinity where possible
+    let key = event.aggregate_id.as_str();
+
+    // We serialize the entire event payload. Headers can be extended to include trace context.
+    let payload = serde_json::to_vec(&event.payload)?;
+
+    // Simple record without headers for now - can add headers back later
+    let rec = FutureRecord::to(topic).key(key).payload(&payload);
+
+    // Send with a timeout; backpressure via await
+    let delivery_timeout = Duration::from_secs(10);
+    match producer.send(rec, delivery_timeout).await {
+        Ok(delivery) => {
+            let (_partition, _offset) = delivery;
+            debug!(?delivery, "Kafka delivery succeeded");
+            Ok(())
+        }
+        Err((e, _msg)) => Err(e.into()),
+    }
+}
 use bookapp_dal::BookRepositoryImpl;
 use opentelemetry::global;
 use opentelemetry::propagation::Extractor;
@@ -6,11 +142,9 @@ use opentelemetry::trace::TraceContextExt;
 use rdkafka::{
     config::ClientConfig,
     consumer::{CommitMode, Consumer, StreamConsumer},
-    message::{Headers, Message},
+    message::Headers,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use tracing::{error, info};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 #[derive(Serialize, Deserialize, Debug)]

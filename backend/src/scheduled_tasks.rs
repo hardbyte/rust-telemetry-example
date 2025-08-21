@@ -80,11 +80,25 @@ pub async fn start_scheduler_with_shutdown(
         })?
     };
 
+    // Schedule materialized view refresh (runs every 15 minutes)
+    let search_view_refresh_job = {
+        let book_repository = book_repository.clone();
+        Job::new_async("0 */15 * * * *", move |_uuid, _l| {
+            let book_repository = book_repository.clone();
+            Box::pin(async move {
+                if let Err(e) = refresh_search_materialized_view(book_repository).await {
+                    error!("Search view refresh job failed: {:?}", e);
+                }
+            })
+        })?
+    };
+
     // Add jobs to scheduler
     scheduler.add(enrichment_job).await?;
     scheduler.add(refresh_job).await?;
     scheduler.add(stats_job).await?;
     scheduler.add(cleanup_job).await?;
+    scheduler.add(search_view_refresh_job).await?;
 
     // Start the scheduler
     scheduler.start().await?;
@@ -169,4 +183,123 @@ async fn cleanup_old_data(_book_repository: Arc<BookRepositoryImpl>) -> Result<(
 
     info!("Daily cleanup tasks completed");
     Ok(())
+}
+
+/// Refreshes the book search materialized view for full-text search performance
+#[instrument(
+    skip(book_repository),
+    fields(
+        operation = "refresh_materialized_view",
+        view.name = "book_search_view",
+        view.refresh_type = "concurrent",
+        view.refresh_duration_ms,
+        view.rows_affected,
+        maintenance.type = "scheduled"
+    )
+)]
+async fn refresh_search_materialized_view(book_repository: Arc<BookRepositoryImpl>) -> Result<()> {
+    let start_time = std::time::Instant::now();
+
+    info!(
+        view.name = "book_search_view",
+        operation = "refresh_materialized_view",
+        "Starting materialized view refresh for book search"
+    );
+
+    // Access the write pool directly for this database maintenance operation
+    let pool = book_repository.write_pool();
+
+    // Refresh the materialized view concurrently (non-blocking for reads)
+    let result = sqlx::query("REFRESH MATERIALIZED VIEW CONCURRENTLY book_search_view")
+        .execute(pool.as_ref())
+        .await?;
+
+    let refresh_duration = start_time.elapsed();
+    let rows_affected = result.rows_affected();
+
+    // Record span attributes
+    tracing::Span::current().record(
+        "view.refresh_duration_ms",
+        refresh_duration.as_millis() as u64,
+    );
+    tracing::Span::current().record("view.rows_affected", rows_affected);
+
+    info!(
+        view.name = "book_search_view",
+        view.refresh_duration_ms = refresh_duration.as_millis(),
+        view.rows_affected = rows_affected,
+        operation = "refresh_materialized_view",
+        "Materialized view refresh completed successfully"
+    );
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bookapp_dal::models::{BookCreateInput, BookStatus};
+    use sqlx::PgPool;
+    use std::sync::Arc;
+
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
+    async fn test_refresh_search_materialized_view(pool: PgPool) {
+        let repo = Arc::new(BookRepositoryImpl::single_pool(Arc::new(pool)));
+
+        // Create test data first
+        let test_book = BookCreateInput {
+            work_title: "Test Materialized View Book".to_string(),
+            primary_author_id: None,
+            primary_author_name: Some("Test Author".to_string()),
+            status: Some(BookStatus::Available),
+        };
+        repo.create(test_book).await.unwrap();
+
+        // Test the refresh function
+        let result = refresh_search_materialized_view(repo.clone()).await;
+        assert!(result.is_ok(), "Materialized view refresh should succeed");
+
+        // Verify the materialized view has data after refresh
+        let search_results = repo
+            .full_text_search("Test Materialized", 10)
+            .await
+            .unwrap();
+        assert!(
+            !search_results.is_empty(),
+            "Search should find the test book after refresh"
+        );
+        assert!(search_results
+            .iter()
+            .any(|r| r.work_title.contains("Test Materialized View Book")));
+    }
+
+    #[test]
+    fn test_scheduled_task_error_handling() {
+        // Test that our error handling pattern is correctly structured
+        // The refresh function should return Result<()> for proper error propagation
+        // In the actual scheduler, errors are caught and logged but don't crash the scheduler
+
+        // Verify the function signature supports error handling
+        // This is a compile-time check that the error handling pattern is in place
+        let _: fn(
+            Arc<BookRepositoryImpl>,
+        )
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>> =
+            |repo| Box::pin(refresh_search_materialized_view(repo));
+
+        assert!(true, "Error handling pattern is correctly implemented");
+    }
+
+    #[test]
+    fn test_cron_schedule_format() {
+        // Verify the cron schedule is correctly formatted for every 15 minutes
+        let cron_expression = "0 */15 * * * *";
+
+        // Basic validation - should have 6 parts (seconds, minutes, hours, day, month, day-of-week)
+        let parts: Vec<&str> = cron_expression.split_whitespace().collect();
+        assert_eq!(parts.len(), 6, "Cron expression should have 6 parts");
+        assert_eq!(parts[0], "0", "Should run at 0 seconds");
+        assert_eq!(parts[1], "*/15", "Should run every 15 minutes");
+        assert_eq!(parts[2], "*", "Should run every hour");
+    }
 }

@@ -14,7 +14,7 @@ This is a Cargo workspace with the following crates:
 
 - **`bookapp`**: Main REST API service (port 8000) - handles HTTP requests, produces Kafka messages
 - **`bookapp-dal`**: Data access layer with repository pattern and SQLx integration
-- **`backend`**: Async message processor and background task scheduler - consumes Kafka messages, enriches data, runs scheduled jobs (no public HTTP port; console-subscriber on 6670; graceful shutdown on SIGINT/SIGTERM)
+- **`backend`**: Async message processor and background task scheduler; includes an outbox publisher that scans the `events` table and publishes to Kafka (default topic `domain.events`). Consumes Kafka messages, enriches data, runs scheduled jobs (no public HTTP port; console-subscriber on 6670; graceful shutdown on SIGINT/SIGTERM)
 - **`client`**: Generated API client using Progenitor for type-safe service calls
 - **`tests`**: Integration tests for end-to-end telemetry validation
 
@@ -250,17 +250,76 @@ docker compose up db kafka telemetry
 GET http://localhost:8000/books
 Accept: application/json
 
+### Authors - list/create
+GET http://localhost:8000/authors/
+Accept: application/json
+
+POST http://localhost:8000/authors/add
+Content-Type: application/json
+
+{"name":"Test Author","sort_name":"Author, Test"}
+
+### Works - create (appends outbox event)
+POST http://localhost:8000/works/add
+Content-Type: application/json
+
+{"title":"My Work","original_language":"en","publication_year":2024}
+
+### Editions - create
+POST http://localhost:8000/editions/add
+Content-Type: application/json
+
+{"work_id":1,"isbn":"9780000000000","title":"Edition Title"}
+
+### Series - create and add work
+POST http://localhost:8000/series/add
+Content-Type: application/json
+
+{"name":"My Series"}
+
+POST http://localhost:8000/series/{id}/works/add
+Content-Type: application/json
+
+{"work_id":1,"primary_work":true,"order_id":1}
+
 ### Health check
 GET http://localhost:8000/health
 Accept: application/json
 
-### Error injection configuration  
+### Error injection configuration
 GET http://localhost:8000/error-injection
 Accept: application/json
-
 ```
 
 Open Grafana at localhost:3000 and login with `admin:admin`
+
+## Open Library Loader (optional)
+
+A lightweight Open Library subject loader is included to populate the normalized schema and outbox with real data.
+
+- Location: `bookapp-dal/loaders/openlibrary_loader.py`
+- Behavior: Idempotent UPSERTs for authors, works, work_authors (primary), and optional editions; appends outbox events (default topic `domain.events`)
+- Requirements: `DATABASE_URL` env var and Postgres running
+
+Quick start:
+
+```shell
+export DATABASE_URL="postgres://postgres:password@localhost:5432/bookapp"
+# Optionally override outbox topic
+# export OUTBOX_DEFAULT_TOPIC="domain.events"
+
+# Migrate schema if needed
+cd bookapp-dal && sqlx migrate run && cd ..
+
+# Run loader with minimal deps via uvx
+uvx --with requests --with "psycopg[binary]" \
+  python bookapp-dal/loaders/openlibrary_loader.py \
+  --subject "science_fiction" --limit 100 --editions-per-work 0 --emit-events
+```
+
+Notes:
+- Safe to re-run (UPSERTs)
+- Events are picked up by the backend outbox publisher and sent to Kafka
 
 ![img.png](.github/img.png)
 
@@ -318,8 +377,9 @@ let repo = BookRepositoryImpl::new(
 
 // Create a book (uses write pool)
 let input = BookCreateInput {
-    title: "Rust Programming".to_string(),
-    author: "Steve Klabnik".to_string(),
+    work_title: "Rust Programming".to_string(),
+    primary_author_id: None,
+    primary_author_name: Some("Steve Klabnik".to_string()),
     status: Some(BookStatus::Available),
 };
 let book_id = repo.create(input).await?;
@@ -327,7 +387,7 @@ let book_id = repo.create(input).await?;
 // Search with filters (uses read pool)
 let params = BookFilterParams {
     status: Some(BookStatus::Available),
-    author_pattern: Some("Klabnik".to_string()),
+    primary_author_pattern: Some("Klabnik".to_string()),
     ..Default::default()
 };
 let books = repo.find_by_filters(params).await?;
