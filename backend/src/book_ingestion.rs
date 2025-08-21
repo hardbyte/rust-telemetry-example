@@ -21,7 +21,6 @@ pub struct OutboxPublisherConfig {
 
 /// Periodically scans the events outbox table for unpublished events and publishes them to Kafka.
 /// Marks events as published or failed accordingly.
-#[instrument(skip_all, fields(batch_size = %config.batch_size))]
 pub async fn start_outbox_publisher(
     pool: Arc<PgPool>,
     producer: FutureProducer,
@@ -40,7 +39,18 @@ pub async fn start_outbox_publisher(
             break;
         }
 
-        match publish_unpublished_events(&repo, pool.as_ref(), &producer, &config).await {
+        // Create a new root span for each polling cycle
+        let cycle_span = tracing::info_span!(
+            "outbox_publish_cycle",
+            batch_size = %config.batch_size,
+            otel.kind = "internal"
+        );
+        
+        let result = cycle_span.in_scope(|| async {
+            publish_unpublished_events(&repo, pool.as_ref(), &producer, &config).await
+        }).await;
+
+        match result {
             Ok(count) => {
                 if count == 0 {
                     // Nothing to do, sleep the full interval
