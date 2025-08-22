@@ -1,21 +1,20 @@
 use crate::book_details::BookDetailsProvider;
 use crate::database::DatabasePools;
-use crate::db::repository::{
-    AuthorRepositoryImpl, EditionRepositoryImpl, EventRepositoryImpl, SeriesRepositoryImpl,
-    WorkRepositoryImpl,
-};
 use crate::db::{
-    Author, AuthorCreateInput, Book, BookRepository, BookRepositoryImpl, BookStatus, Edition,
-    EditionCreateInput, EventCreateInput, Series, SeriesCreateInput,
-    SeriesWorksAssociationCreateInput, Work, WorkCreateInput,
+    Book, BookRepository, BookRepositoryImpl,
 };
 use axum::extract::Path;
 use axum::http::StatusCode;
-use axum::routing::{delete, get, patch, post};
+use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
-use bookapp_dal::models::{BookCreateInput, BookSearchResult};
+use bookapp_dal::models::{
+    Author, AuthorCreateInput, BookCreateInput, BookSearchResult,
+    EditionCreateInput, EventCreateInput, SeriesCreateInput,
+    SeriesWorksAssociationCreateInput, WorkCreateInput,
+};
 use bookapp_dal::repository::{
-    AuthorRepository, EditionRepository, EventRepository, SeriesRepository, WorkRepository,
+    AuthorRepository, AuthorRepositoryImpl, EditionRepository, EditionRepositoryImpl,
+    EventRepositoryImpl, SeriesRepository, SeriesRepositoryImpl, WorkRepositoryImpl,
 };
 use rdkafka::producer::FutureProducer;
 use serde::Deserialize;
@@ -107,7 +106,8 @@ async fn update_book(
     let mut current = if let Some(b) = existing {
         b
     } else {
-        return Err(StatusCode::NOT_FOUND);
+        // Book doesn't exist, return 0 rows affected (like SQL UPDATE would)
+        return Ok(Json(0));
     };
 
     // Apply updates from the normalized input

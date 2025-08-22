@@ -5,7 +5,7 @@ mod tests {
     use crate::book_ingestion;
     use crate::database::DatabasePools;
     use crate::db::repository::{
-        AuthorRepositoryImpl, EditionRepositoryImpl, EventRepositoryImpl, SeriesRepositoryImpl,
+        EditionRepositoryImpl, EventRepositoryImpl, SeriesRepositoryImpl,
     };
     use crate::db::{BookRepository, BookRepositoryImpl, BookStatus};
     use axum::{
@@ -14,7 +14,7 @@ mod tests {
         Extension,
     };
     use bookapp_dal::models::{
-        AuthorCreateInput, BookCreateInput, EditionCreateInput, SeriesCreateInput, WorkCreateInput,
+        BookCreateInput,
     };
     use bookapp_dal::repository::{EditionRepository, EventRepository, SeriesRepository};
     use dotenv::dotenv;
@@ -151,10 +151,9 @@ mod tests {
             .method("PATCH")
             .uri("/books/99999")
             .header("content-type", "application/json")
-            .body(Body::from(r#"{"author":"A","title":"T"}"#))
+            .body(Body::from(r#"{"work_title":"T","primary_author_name":"A"}"#))
             .unwrap();
         let response = app.oneshot(req).await.unwrap();
-
         // The update_book handler returns OK even if the book doesn't exist
         // because it returns the rows_affected as i32, which will be 0 for non-existent books
         assert_eq!(response.status(), StatusCode::OK);
@@ -364,6 +363,7 @@ mod tests {
             .layer(Extension(producer))
     }
 
+
     #[sqlx::test]
     async fn test_authors_create_and_list(pool: PgPool) {
         let app = setup_full_test_app(pool.clone()).await;
@@ -386,14 +386,19 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/authors/")
+                    .uri("/authors")
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(list_resp.status(), StatusCode::OK);
-
+        let status = list_resp.status();
+        if status != StatusCode::OK {
+            let body_bytes = axum::body::to_bytes(list_resp.into_body(), usize::MAX).await.unwrap();
+            let body_str = String::from_utf8_lossy(&body_bytes);
+            panic!("GET /authors/ returned {}, body: {}", status, body_str);
+        }
+        
         let json = get_response_json(list_resp).await;
         assert!(json.is_array());
         let arr = json.as_array().unwrap();

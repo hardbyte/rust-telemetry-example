@@ -20,12 +20,14 @@
 //!
 //! ```rust,no_run
 //! use tracing_subscriber::layer::SubscriberExt;
-//! use sentry_correlation::SentryOtelCorrelationLayer;
-//!
-//! let subscriber = tracing_subscriber::Registry::default()
-//!     .with(opentelemetry_tracing_layer)      // OpenTelemetry layer first
-//!     .with(SentryOtelCorrelationLayer::new()) // Correlation bridge
-//!     .with(sentry_tracing_layer);            // Sentry layer captures events
+//! use observability_utils::SentryOtelCorrelationLayer;
+//! // Pseudo-code example - actual layers would be properly configured
+//! // let opentelemetry_tracing_layer = tracing_opentelemetry::layer();
+//! // let sentry_tracing_layer = sentry::integrations::tracing::layer();
+//! // let subscriber = tracing_subscriber::Registry::default()
+//! //     .with(opentelemetry_tracing_layer)      // OpenTelemetry layer first
+//! //     .with(SentryOtelCorrelationLayer::new()) // Correlation bridge
+//! //     .with(sentry_tracing_layer);            // Sentry layer captures events
 //! ```
 //!
 //! # Layer Ordering
@@ -71,7 +73,7 @@ use tracing_subscriber::Layer;
 /// # Example
 ///
 /// ```rust,no_run
-/// use sentry_correlation::SentryOtelCorrelationLayer;
+/// use observability_utils::SentryOtelCorrelationLayer;
 /// use tracing_subscriber::layer::SubscriberExt;
 ///
 /// // Add to subscriber stack

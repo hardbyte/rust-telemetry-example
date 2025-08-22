@@ -398,15 +398,10 @@ dependencies = [
  "async-trait",
  "bookapp-dal",
  "chrono",
- "console-subscriber",
  "dotenv",
+ "observability-utils",
  "opentelemetry 0.30.0",
- "opentelemetry-appender-tracing",
- "opentelemetry-otlp",
- "opentelemetry_sdk 0.30.0",
  "rdkafka",
- "sentry",
- "sentry-tower",
  "serde",
  "serde_json",
  "signal-hook",
@@ -416,7 +411,6 @@ dependencies = [
  "tokio-cron-scheduler",
  "tracing",
  "tracing-opentelemetry",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -486,6 +480,7 @@ dependencies = [
  "hostname",
  "hyper",
  "matchit 0.8.4",
+ "observability-utils",
  "opentelemetry 0.30.0",
  "opentelemetry-appender-tracing",
  "opentelemetry-http",
@@ -510,6 +505,7 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-opentelemetry-instrumentation-sdk",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -1941,6 +1937,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62948e14d923ea95ea2c7c86c71013138b66525b86bdc08d2dcc262bdb497b87"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "observability-utils"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "console-api",
+ "console-subscriber",
+ "opentelemetry 0.30.0",
+ "opentelemetry-appender-tracing",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk 0.30.0",
+ "sentry",
+ "tokio",
+ "tonic 0.12.3",
+ "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
 ]
 
 [[package]]

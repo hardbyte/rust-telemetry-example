@@ -5,6 +5,7 @@ members = [
     "bookapp",
     "bookapp-dal",
     "backend",
+    "observability-utils",
     "tests",
 ]
 
