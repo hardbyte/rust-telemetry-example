@@ -1,8 +1,6 @@
 mod book_enrichment;
 mod book_ingestion;
 mod scheduled_tasks;
-mod sentry_correlation;
-mod tracing_config;
 
 use anyhow::Result;
 use book_ingestion::OutboxPublisherConfig;
@@ -26,8 +24,10 @@ async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
     // Initialize tracing and observability
+    let observability_config = observability_utils::ObservabilityConfig::new("backend")
+        .with_console_port(6670);
     let (trace_provider, meter_provider, log_provider, sentry_guard) =
-        tracing_config::init_tracing();
+        observability_utils::init_tracing(observability_config.clone());
 
     info!("Starting backend service");
 
@@ -39,6 +39,12 @@ async fn main() -> Result<()> {
         .await?;
 
     let db_pool = Arc::new(db_pool);
+
+    // Start tokio runtime metrics collection
+    let _tokio_metrics_handle = observability_utils::start_tokio_metrics(&observability_config, &meter_provider);
+    
+    // Start tokio task-level metrics collection  
+    let _task_metrics_handle = observability_utils::start_task_metrics(&observability_config, &meter_provider);
 
     // Create repository for database operations
     let book_repository = Arc::new(BookRepositoryImpl::new(db_pool.clone(), db_pool.clone()));

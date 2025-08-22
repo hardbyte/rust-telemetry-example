@@ -10,9 +10,7 @@ mod reqwest_traced_client;
 mod rest;
 #[cfg(test)]
 mod rest_tests;
-mod sentry_correlation;
 mod topic_management;
-mod tracing_config;
 
 use crate::book_details::{BookDetailsProvider, RemoteBookDetailsProvider};
 use std::sync::Arc;
@@ -98,19 +96,27 @@ async fn main() -> Result<()> {
     let enable_kafka_producer =
         std::env::var("ENABLE_KAFKA_PRODUCER").unwrap_or_else(|_| "false".to_string()) == "true";
 
+    let observability_config = observability_utils::ObservabilityConfig::new("bookapp")
+        .with_console_port(6669);
     let (trace_provider, meter_provider, log_provider, sentry_guard) =
-        tracing_config::init_tracing();
+        observability_utils::init_tracing(observability_config.clone());
 
     // Init db
     info!("Setting up Database");
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     // Increase pool size for development with multiple services
-    let config = database::DatabaseConfig {
+    let db_config = database::DatabaseConfig {
         max_connections: 20, // Increased from default 10
         min_connections: 5,  // Increased from default 2
         ..Default::default()
     };
-    let db_pools = DatabasePools::single(&db_url, Some(config)).await?;
+    let db_pools = DatabasePools::single(&db_url, Some(db_config)).await?;
+
+    // Start tokio runtime metrics collection
+    let _tokio_metrics_handle = observability_utils::start_tokio_metrics(&observability_config, &meter_provider);
+    
+    // Start tokio task-level metrics collection
+    let _task_metrics_handle = observability_utils::start_task_metrics(&observability_config, &meter_provider);
 
     // Create Kafka admin client
     let admin_client = topic_management::create_admin_client()?;
