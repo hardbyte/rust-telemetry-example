@@ -30,7 +30,6 @@
         "y": 0
       },
       "id": 100,
-      "panels": [],
       "title": "\ud83c\udfaf Service Health & Status",
       "type": "row"
     },
@@ -361,7 +360,6 @@
         "y": 5
       },
       "id": 120,
-      "panels": [],
       "title": "\ud83d\udc33 Container Resources",
       "type": "row"
     },
@@ -457,7 +455,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "container_cpu_utilization_ratio{container_name=~\"rust-telemetry-example.*\"}",
+          "expr": "rate(container_cpu_usage_nanoseconds_total{container_name=~\"rust-telemetry-example.*\"}[5m]) / 1000000000",
           "legendFormat": "{{container_name}}",
           "range": true,
           "refId": "A"
@@ -572,12 +570,13 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Current resource usage stats for all service containers",
+      "description": "Comprehensive resource usage summary for all containers including CPU utilization, memory usage, memory limits, and disk usage",
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "thresholds"
           },
+          "unit": "short",
           "custom": {
             "align": "auto",
             "cellOptions": {
@@ -621,6 +620,10 @@
                   "mode": "gradient",
                   "type": "gauge"
                 }
+              },
+              {
+                "id": "max",
+                "value": 1
               }
             ]
           },
@@ -640,6 +643,10 @@
                   "mode": "gradient",
                   "type": "gauge"
                 }
+              },
+              {
+                "id": "max",
+                "value": 100
               }
             ]
           },
@@ -652,6 +659,60 @@
               {
                 "id": "unit",
                 "value": "bytes"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Memory Limit"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Disk Used"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Container"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 200
               }
             ]
           }
@@ -690,7 +751,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(container_cpu_usage_nanoseconds_total{container_name=~\"rust-telemetry-example.*\"}[5m]) / 1000000000 * 100",
+          "expr": "rate(container_cpu_usage_nanoseconds_total{container_name=~\".*-(app|backend|db|kafka|zookeeper|loki|grafana|tempo|mimir|prometheus|otelcol).*\"}[5m]) / 1000000000",
           "format": "table",
           "instant": true,
           "refId": "CPU"
@@ -701,7 +762,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(container_memory_usage_total_bytes{container_name=~\"rust-telemetry-example.*\"} / container_memory_usage_limit_bytes{container_name=~\"rust-telemetry-example.*\"}) * 100",
+          "expr": "container_memory_working_set_bytes{container_name=~\".*-(app|backend|db|kafka|zookeeper|loki|grafana|tempo|mimir|prometheus|otelcol).*\"} / container_spec_memory_limit_bytes{container_name=~\".*-(app|backend|db|kafka|zookeeper|loki|grafana|tempo|mimir|prometheus|otelcol).*\"} * 100",
           "format": "table",
           "instant": true,
           "refId": "MEMORY_PCT"
@@ -712,10 +773,32 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "container_memory_usage_total_bytes{container_name=~\"rust-telemetry-example.*\"}",
+          "expr": "container_memory_working_set_bytes{container_name=~\".*-(app|backend|db|kafka|zookeeper|loki|grafana|tempo|mimir|prometheus|otelcol).*\"}",
           "format": "table",
           "instant": true,
           "refId": "MEMORY_BYTES"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "container_spec_memory_limit_bytes{container_name=~\".*-(app|backend|db|kafka|zookeeper|loki|grafana|tempo|mimir|prometheus|otelcol).*\"}",
+          "format": "table",
+          "instant": true,
+          "refId": "MEMORY_LIMIT"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "container_fs_usage_bytes{container_name=~\".*-(app|backend|db|kafka|zookeeper|loki|grafana|tempo|mimir|prometheus|otelcol).*\"}",
+          "format": "table",
+          "instant": true,
+          "refId": "DISK_USAGE"
         }
       ],
       "title": "Container Resource Summary",
@@ -735,99 +818,62 @@
               "Time 1": true,
               "Time 2": true,
               "Time 3": true,
+              "Time 4": true,
+              "Time 5": true,
               "__name__": true,
               "__name__ 1": true,
               "__name__ 2": true,
               "__name__ 3": true,
+              "__name__ 4": true,
+              "__name__ 5": true,
               "container_id": true,
               "container_id 1": true,
               "container_id 2": true,
               "container_id 3": true,
+              "container_id 4": true,
+              "container_id 5": true,
               "image": true,
               "image 1": true,
               "image 2": true,
               "image 3": true,
+              "image 4": true,
+              "image 5": true,
               "job": true,
               "job 1": true,
               "job 2": true,
               "job 3": true,
-              "service_health_1": true,
+              "job 4": true,
+              "job 5": true,
               "hostname": true,
               "hostname 1": true,
               "hostname 2": true,
               "hostname 3": true,
+              "hostname 4": true,
+              "hostname 5": true,
               "instance": true,
               "instance 1": true,
               "instance 2": true,
-              "instance 3": true
+              "instance 3": true,
+              "instance 4": true,
+              "instance 5": true
             },
             "includeByName": {},
             "indexByName": {
               "container_name": 0,
               "Value #CPU": 1,
               "Value #MEMORY_PCT": 2,
-              "Value #MEMORY_BYTES": 3
+              "Value #MEMORY_BYTES": 3,
+              "Value #MEMORY_LIMIT": 4,
+              "Value #DISK_USAGE": 5
             },
             "renameByName": {
               "Value #CPU": "CPU %",
-              "Value #MEMORY_BYTES": "Memory Used (MB)",
+              "Value #MEMORY_BYTES": "Memory Used",
               "Value #MEMORY_PCT": "Memory %",
+              "Value #MEMORY_LIMIT": "Memory Limit",
+              "Value #DISK_USAGE": "Disk Used",
               "container_name": "Container"
             }
-          }
-        },
-        {
-          "id": "fieldConfig",
-          "options": {
-            "defaults": {
-              "unit": "short"
-            },
-            "overrides": [
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "Memory Used (MB)"
-                },
-                "properties": [
-                  {
-                    "id": "unit",
-                    "value": "bytes"
-                  }
-                ]
-              },
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "CPU %"
-                },
-                "properties": [
-                  {
-                    "id": "unit",
-                    "value": "percent"
-                  },
-                  {
-                    "id": "max",
-                    "value": 100
-                  }
-                ]
-              },
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "Memory %"
-                },
-                "properties": [
-                  {
-                    "id": "unit",
-                    "value": "percent"
-                  },
-                  {
-                    "id": "max",
-                    "value": 100
-                  }
-                ]
-              }
-            ]
           }
         }
       ],
@@ -1148,7 +1194,6 @@
         "y": 22
       },
       "id": 102,
-      "panels": [],
       "title": "\ud83d\udd0d Operational Insights",
       "type": "row"
     },
@@ -1546,48 +1591,25 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
+            "mode": "thresholds"
           },
           "mappings": [],
+          "max": 1000,
+          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 500
               },
               {
                 "color": "red",
-                "value": 80
+                "value": 800
               }
             ]
           },
@@ -1603,16 +1625,21 @@
       },
       "id": 11,
       "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom"
+        "minVizHeight": 75,
+        "minVizWidth": 75,
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
         },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "sizing": "auto"
       },
+      "pluginVersion": "12.1.1",
       "targets": [
         {
           "datasource": {
@@ -1621,12 +1648,13 @@
           },
           "editorMode": "code",
           "expr": "bt_sql_books_count",
-          "range": true,
+          "instant": true,
+          "range": false,
           "refId": "A"
         }
       ],
       "title": "Books Count",
-      "type": "timeseries"
+      "type": "gauge"
     },
     {
       "collapsed": false,
@@ -1649,7 +1677,6 @@
         "y": 48
       },
       "id": 105,
-      "panels": [],
       "title": "\ud83d\udcc8 Data Ingestion & Processing",
       "type": "row"
     },
@@ -1860,7 +1887,6 @@
         "y": 57
       },
       "id": 104,
-      "panels": [],
       "title": "\ud83d\udd0d Logs & Traces",
       "type": "row"
     },
@@ -2085,7 +2111,6 @@
         "y": 74
       },
       "id": 106,
-      "panels": [],
       "title": "\u2699\ufe0f Tokio Runtime Metrics",
       "type": "row"
     },
@@ -2189,7 +2214,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Number of currently active (alive) tasks in the Tokio runtime",
+      "description": "Number of currently alive tasks in the Tokio runtime",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2270,7 +2295,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "tokio_tasks_active",
+          "expr": "tokio_alive_tasks",
           "legendFormat": "Active Tasks: {{service_name}}",
           "range": true,
           "refId": "A"
@@ -2365,8 +2390,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(tokio_tasks_spawned[5m])",
-          "legendFormat": "Task Spawn Rate: {{service_name}}",
+          "expr": "tokio_spawned_tasks_total",
+          "legendFormat": "Total Spawned Tasks: {{service_name}}",
           "range": true,
           "refId": "A"
         }
@@ -2489,7 +2514,6 @@
         "y": 25
       },
       "id": 901,
-      "panels": [],
       "title": "\ud83d\udd0e Search Refresh",
       "type": "row"
     },
@@ -2576,8 +2600,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (reason)(rate(search_refresh_skipped_total[5m]))",
-          "legendFormat": "{{reason}}",
+          "expr": "sum by (reason_category)(\n  label_replace(\n    label_replace(\n      label_replace(\n        label_replace(\n          rate(search_refresh_skipped_total[5m]),\n          \"reason_category\", \"rate_limited\", \"reason\", \"rate limited:.*\"\n        ),\n        \"reason_category\", \"no_updates\", \"reason\", \"no pending updates\"\n      ),\n      \"reason_category\", \"in_progress\", \"reason\", \".*in progress.*\"\n    ),\n    \"reason_category\", \"other\", \"reason\", \"^(?!rate_limited|no_updates|in_progress$).*\"\n  )\n)",
+          "legendFormat": "{{reason_category}}",
           "range": true,
           "refId": "A"
         }
@@ -2693,6 +2717,22 @@
       },
       "fieldConfig": {
         "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 300
+              }
+            ]
+          },
           "unit": "s"
         },
         "overrides": []

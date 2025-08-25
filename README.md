@@ -110,6 +110,9 @@ This repository demonstrates several production-ready observability patterns:
 - **Instrumented Load Testing**: The included Locust load testing script is itself instrumented with OpenTelemetry, allowing you to trace requests originating from the load generator all the way through the system.
 - **Health Monitoring**: Dedicated `/health` endpoint for application health checks, monitored by OpenTelemetry Collector's httpcheck receiver without generating traces, keeping observability data clean.
 
+
+![dashboard.png](.github/dashboard.png)
+
 ## A Deeper Look
 
 ### Tracing
