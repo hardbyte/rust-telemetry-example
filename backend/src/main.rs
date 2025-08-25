@@ -90,7 +90,7 @@ async fn main() -> Result<()> {
             std::env::var("OUTBOX_POLL_MS")
                 .ok()
                 .and_then(|s| s.parse::<u64>().ok())
-                .unwrap_or(500),
+                .unwrap_or(5000),
         ),
     };
 
