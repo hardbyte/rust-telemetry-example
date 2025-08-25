@@ -1,0 +1,100 @@
+{
+  "apiVersion": 1,
+  "groups": [
+    {
+      "orgId": 1,
+      "name": "Search Refresh Alerts",
+      "folder": "Alert Rules",
+      "interval": "5m",
+      "rules": [
+        {
+          "uid": "search_refresh_staleness",
+          "title": "Search Refresh Staleness",
+          "condition": "B",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                },
+                "editorMode": "code",
+                "exemplar": false,
+                "expr": "(time() - search_refresh_last_refresh_timestamp_seconds) / 60",
+                "instant": true,
+                "interval": "",
+                "intervalMs": 300000,
+                "legendFormat": "auto",
+                "maxDataPoints": 43200,
+                "range": false,
+                "refId": "A",
+                "step": "auto",
+                "format": "time_series"
+              }
+            },
+            {
+              "refId": "B",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "datasourceUid": "__expr__",
+              "model": {
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "params": [
+                        20
+                      ],
+                      "type": "gt"
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "A"
+                      ]
+                    },
+                    "reducer": {
+                      "params": [],
+                      "type": "last"
+                    },
+                    "type": "query"
+                  }
+                ],
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "A",
+                "intervalMs": 1000,
+                "maxDataPoints": 43200,
+                "refId": "B",
+                "type": "threshold"
+              }
+            }
+          ],
+          "noDataState": "NoData",
+          "execErrState": "Alerting",
+          "for": "5m",
+          "annotations": {
+            "summary": "Search refresh has been stale for more than 20 minutes",
+            "description": "Monitors the last refresh timestamp of the search index and alerts when it has not been refreshed for more than 20 minutes, indicating potential issues with the scheduled refresh job."
+          },
+          "labels": {},
+          "isPaused": false,
+          "notification_settings": {
+            "receiver": "grafana-default-email"
+          }
+        }
+      ]
+    }
+  ]
+}
