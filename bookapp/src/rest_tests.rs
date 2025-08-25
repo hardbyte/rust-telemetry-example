@@ -4,17 +4,16 @@ mod tests {
     use crate::book_details::{BookDetailsProvider, StubBookDetailsProvider};
     use crate::book_ingestion;
     use crate::database::DatabasePools;
-    use crate::db::repository::{
-        EditionRepositoryImpl, EventRepositoryImpl, SeriesRepositoryImpl,
-    };
-    use crate::db::{BookRepository, BookRepositoryImpl, BookStatus};
     use axum::{
         body::Body,
         http::{Request, StatusCode},
         Extension,
     };
-    use bookapp_dal::models::{
-        BookCreateInput,
+    use bookapp_dal::models::BookCreateInput;
+    use bookapp_dal::models::BookStatus;
+    use bookapp_dal::repository::{
+        BookRepository, BookRepositoryImpl, EditionRepositoryImpl, EventRepositoryImpl,
+        SeriesRepositoryImpl,
     };
     use bookapp_dal::repository::{EditionRepository, EventRepository, SeriesRepository};
     use dotenv::dotenv;
@@ -151,7 +150,9 @@ mod tests {
             .method("PATCH")
             .uri("/books/99999")
             .header("content-type", "application/json")
-            .body(Body::from(r#"{"work_title":"T","primary_author_name":"A"}"#))
+            .body(Body::from(
+                r#"{"work_title":"T","primary_author_name":"A"}"#,
+            ))
             .unwrap();
         let response = app.oneshot(req).await.unwrap();
         // The update_book handler returns OK even if the book doesn't exist
@@ -363,7 +364,6 @@ mod tests {
             .layer(Extension(producer))
     }
 
-
     #[sqlx::test]
     async fn test_authors_create_and_list(pool: PgPool) {
         let app = setup_full_test_app(pool.clone()).await;
@@ -394,11 +394,13 @@ mod tests {
             .unwrap();
         let status = list_resp.status();
         if status != StatusCode::OK {
-            let body_bytes = axum::body::to_bytes(list_resp.into_body(), usize::MAX).await.unwrap();
+            let body_bytes = axum::body::to_bytes(list_resp.into_body(), usize::MAX)
+                .await
+                .unwrap();
             let body_str = String::from_utf8_lossy(&body_bytes);
             panic!("GET /authors/ returned {}, body: {}", status, body_str);
         }
-        
+
         let json = get_response_json(list_resp).await;
         assert!(json.is_array());
         let arr = json.as_array().unwrap();

@@ -1,39 +1,44 @@
-use crate::book_details::BookDetailsProvider;
 use crate::database::DatabasePools;
-use crate::db::{
-    Book, BookRepository, BookRepositoryImpl,
-};
+use anyhow::Result as AnyhowResult;
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
+use bookapp_dal::models::BookStatus;
 use bookapp_dal::models::{
-    Author, AuthorCreateInput, BookCreateInput, BookSearchResult,
-    EditionCreateInput, EventCreateInput, SeriesCreateInput,
-    SeriesWorksAssociationCreateInput, WorkCreateInput,
+    Author, AuthorCreateInput, BookCreateInput, BookSearchResult, EditionCreateInput,
+    EventCreateInput, SeriesCreateInput, SeriesWorksAssociationCreateInput, WorkCreateInput,
 };
 use bookapp_dal::repository::{
     AuthorRepository, AuthorRepositoryImpl, EditionRepository, EditionRepositoryImpl,
-    EventRepositoryImpl, SeriesRepository, SeriesRepositoryImpl, WorkRepositoryImpl,
+    EventRepository, EventRepositoryImpl, SeriesRepository, SeriesRepositoryImpl,
+    WorkRepositoryImpl,
 };
+use bookapp_dal::{Book, BookRepository, BookRepositoryImpl};
 use rdkafka::producer::FutureProducer;
 use serde::Deserialize;
-use std::sync::Arc;
 use tracing::Level;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+use utoipa::OpenApi;
 
-#[tracing::instrument(skip(db_pools, details), fields(num_books))]
+#[utoipa::path(
+    get,
+    path = "/books",
+    responses(
+        (status = 200, description = "List all books", body = [Book]),
+        (status = 503, description = "Database temporarily unavailable")
+    ),
+    tag = "Books"
+)]
+#[tracing::instrument(skip(db_pools), fields(num_books))]
 async fn get_all_books(
     Extension(db_pools): Extension<DatabasePools>,
-    Extension(details): Extension<Arc<dyn BookDetailsProvider>>,
 ) -> Result<Json<Vec<Book>>, StatusCode> {
     tracing::info!("Getting all books");
     let repo = BookRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
     match repo.find_all().await {
         Ok(books) => {
             tracing::Span::current().record("num_books", books.len() as i64);
-            // delegate to injected provider
-            details.enrich_book_details(&books).await;
             Ok(Json(books))
         }
         Err(e) => {
@@ -43,6 +48,18 @@ async fn get_all_books(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/books/{id}",
+    responses(
+        (status = 200, description = "Book found", body = Book),
+        (status = 404, description = "Book not found")
+    ),
+    params(
+        ("id" = i32, Path, description = "Book ID")
+    ),
+    tag = "Books"
+)]
 #[tracing::instrument(skip(db_pools), ret(level = Level::TRACE))]
 async fn get_book(
     Extension(db_pools): Extension<DatabasePools>,
@@ -78,6 +95,18 @@ async fn get_book(
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/books/{id}",
+    responses(
+        (status = 200, description = "Book deleted successfully"),
+        (status = 404, description = "Book not found")
+    ),
+    params(
+        ("id" = i32, Path, description = "Book ID")
+    ),
+    tag = "Books"
+)]
 #[tracing::instrument(skip(db_pools))]
 async fn delete_book(
     Extension(db_pools): Extension<DatabasePools>,
@@ -90,6 +119,19 @@ async fn delete_book(
     }
 }
 
+#[utoipa::path(
+    patch,
+    path = "/books/{id}",
+    request_body = BookCreateInput,
+    responses(
+        (status = 200, description = "Book updated successfully", body = i32),
+        (status = 404, description = "Book not found")
+    ),
+    params(
+        ("id" = i32, Path, description = "Book ID")
+    ),
+    tag = "Books"
+)]
 #[tracing::instrument(skip(db_pools), fields(work.id = %id, work.title = %book_data.work_title))]
 async fn update_book(
     Extension(db_pools): Extension<DatabasePools>,
@@ -128,16 +170,37 @@ async fn update_book(
     }
 }
 
-#[tracing::instrument(skip(db_pools, producer))]
+#[utoipa::path(
+    post,
+    path = "/books/add",
+    request_body = BookCreateInput,
+    responses(
+        (status = 201, description = "Book created successfully", body = i32)
+    ),
+    tag = "Books"
+)]
+#[tracing::instrument(skip(db_pools, _producer))]
 async fn create_book(
     Extension(db_pools): Extension<DatabasePools>,
-    Extension(producer): Extension<FutureProducer>,
+    Extension(_producer): Extension<FutureProducer>,
     Json(book): Json<BookCreateInput>,
 ) -> Result<(StatusCode, Json<i32>), StatusCode> {
-    let repo = BookRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
-    match repo.create(book).await {
+    let book_repo =
+        BookRepositoryImpl::new(db_pools.write_pool.clone(), db_pools.read_pool.clone());
+    let event_repo = EventRepositoryImpl::new(db_pools.write_pool.clone(), db_pools.read_pool);
+
+    match book_repo.create(book.clone()).await {
         Ok(new_id) => {
-            queue_background_ingestion_task(&producer, new_id).await;
+            // Create domain event for outbox pattern
+            if let Err(e) = create_book_created_event(&event_repo, new_id, &book).await {
+                tracing::error!(
+                    error = %e,
+                    book_id = new_id,
+                    "Failed to create BookCreated domain event"
+                );
+                // Note: We don't fail the request since the book was successfully created
+            }
+
             Ok((StatusCode::CREATED, Json(new_id)))
         }
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
@@ -193,7 +256,10 @@ pub fn book_service() -> Router {
         .route("/search", get(search_books))
         .route("/add", post(create_book))
         .route("/bulk_add", post(bulk_create_books))
-        .route("/{id}", get(get_book).patch(update_book).delete(delete_book))
+        .route(
+            "/{id}",
+            get(get_book).patch(update_book).delete(delete_book),
+        )
 }
 
 #[tracing::instrument(skip(db_pools))]
@@ -311,9 +377,11 @@ async fn create_series(
     Ok((StatusCode::CREATED, Json(id)))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
 pub struct SearchParams {
+    /// Search query string
     q: String,
+    /// Maximum number of results to return
     #[serde(default = "default_limit")]
     limit: i64,
 }
@@ -322,6 +390,15 @@ fn default_limit() -> i64 {
     20
 }
 
+#[utoipa::path(
+    get,
+    path = "/books/search",
+    params(SearchParams),
+    responses(
+        (status = 200, description = "Search results", body = [BookSearchResult])
+    ),
+    tag = "Books"
+)]
 #[tracing::instrument(
     skip(db_pools),
     fields(
@@ -490,4 +567,97 @@ pub fn api_router() -> Router {
         .nest("/works", work_service())
         .nest("/editions", edition_service())
         .nest("/series", series_service())
+}
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        get_all_books,
+        get_book,
+        create_book,
+        update_book,
+        delete_book,
+        search_books
+    ),
+    components(
+        schemas(Book, BookCreateInput, BookStatus, BookSearchResult)
+    ),
+    tags(
+        (name = "Books", description = "Book management API endpoints")
+    ),
+    info(
+        title = "Book Service API",
+        description = "API for managing books in the library with distributed tracing support",
+        version = "1.0.0",
+        contact(
+            name = "BookApp API",
+            url = "http://localhost:8000"
+        )
+    ),
+    servers(
+        (url = "http://localhost:8000", description = "Local development server")
+    )
+)]
+pub struct ApiDoc;
+
+async fn serve_openapi() -> axum::response::Json<utoipa::openapi::OpenApi> {
+    axum::response::Json(ApiDoc::openapi())
+}
+
+/// Create a BookCreated domain event for the outbox pattern
+#[tracing::instrument(skip(event_repo), fields(book_id = %book_id))]
+async fn create_book_created_event(
+    event_repo: &EventRepositoryImpl,
+    book_id: i32,
+    book: &BookCreateInput,
+) -> AnyhowResult<i64> {
+    use opentelemetry::trace::TraceContextExt;
+    use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+    // Get current trace context for event correlation
+    let span_context = tracing::Span::current().context();
+    let otel_span = span_context.span();
+    let trace_id = format!("{:032x}", otel_span.span_context().trace_id());
+    let span_id = format!("{:016x}", otel_span.span_context().span_id());
+
+    let event = EventCreateInput {
+        aggregate_type: "Book".to_string(),
+        aggregate_id: book_id.to_string(),
+        event_type: "BookCreated".to_string(),
+        payload: serde_json::json!({
+            "book_id": book_id,
+            "work_title": book.work_title,
+            "primary_author_name": book.primary_author_name,
+            "status": book.status
+        }),
+        headers: Some(serde_json::json!({})),
+        trace_id: Some(trace_id),
+        span_id: Some(span_id),
+        source_service: Some("bookapp".to_string()),
+        version: Some(1),
+        topic: Some("book_ingestion".to_string()),
+        published_at: None,
+        publish_attempts: None,
+        publish_error: None,
+    };
+
+    event_repo
+        .append(event)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to create event: {}", e))
+}
+
+pub fn openapi_router() -> Router {
+    use axum::{response::Html, routing::get};
+    use utoipa_swagger_ui::SwaggerUi;
+
+    let debug_route = Router::new().route(
+        "/debug",
+        get(|| async { Html("<h1>OpenAPI router is working!</h1>") }),
+    );
+
+    Router::new()
+        .merge(api_router())
+        .merge(debug_route)
+        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
 }

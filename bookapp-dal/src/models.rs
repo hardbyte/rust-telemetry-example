@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use sqlx::Type;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+use utoipa::ToSchema;
+
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct BookCreateInput {
     // Normalized: create a work with a primary author (by id or by name)
     pub work_title: String,
@@ -13,7 +15,7 @@ pub struct BookCreateInput {
     pub status: Option<BookStatus>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Type, Clone, PartialEq, Default)]
+#[derive(Debug, Serialize, Deserialize, Type, Clone, PartialEq, Default, ToSchema)]
 #[sqlx(type_name = "book_status", rename_all = "lowercase")]
 pub enum BookStatus {
     #[default]
@@ -22,7 +24,7 @@ pub enum BookStatus {
     Lost,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
+#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, ToSchema)]
 pub struct Book {
     // Represents a denormalized view of a Work with its primary author
     pub id: i32,                     // work id
@@ -67,7 +69,7 @@ pub struct BookSearchParams {
     pub per_page: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
+#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, ToSchema)]
 pub struct Author {
     pub id: i32,
     pub name: String,
@@ -76,7 +78,7 @@ pub struct Author {
     pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct AuthorCreateInput {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -222,7 +224,7 @@ pub struct Event {
     pub publish_error: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
+#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, ToSchema)]
 pub struct BookSearchResult {
     pub work_id: i32,
     pub work_title: String,

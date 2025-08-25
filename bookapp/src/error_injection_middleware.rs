@@ -7,10 +7,10 @@ use matchit::Router as MatchRouter;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgPool};
-use std::sync::Arc;
 use std::collections::HashMap;
-use tokio::sync::RwLock;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
 
 #[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
 pub struct ErrorInjectionConfig {
@@ -214,7 +214,7 @@ impl CachedErrorInjectionConfigStore {
             cache_ttl: Duration::from_secs(60), // 1 minute cache
         }
     }
-    
+
     async fn is_cache_valid(&self, key: &str) -> bool {
         let cache = self.cache.read().await;
         if let Some((_, timestamp)) = cache.get(key) {
@@ -229,71 +229,81 @@ impl CachedErrorInjectionConfigStore {
 impl ErrorInjectionConfigStore for CachedErrorInjectionConfigStore {
     async fn get_all_configs(&self) -> anyhow::Result<Vec<ErrorInjectionConfig>> {
         const CACHE_KEY: &str = "all_configs";
-        
+
         if self.is_cache_valid(CACHE_KEY).await {
             let cache = self.cache.read().await;
             if let Some((configs, _)) = cache.get(CACHE_KEY) {
                 return Ok(configs.clone());
             }
         }
-        
+
         // Cache miss - fetch from database
         let configs = self.inner.get_all_configs().await?;
-        
+
         // Update cache
         let mut cache = self.cache.write().await;
         cache.insert(CACHE_KEY.to_string(), (configs.clone(), Instant::now()));
-        
+
         Ok(configs)
     }
 
-    async fn get_configs_for_method(&self, method: &str) -> anyhow::Result<Vec<ErrorInjectionConfig>> {
+    async fn get_configs_for_method(
+        &self,
+        method: &str,
+    ) -> anyhow::Result<Vec<ErrorInjectionConfig>> {
         let cache_key = format!("method_{}", method);
-        
+
         if self.is_cache_valid(&cache_key).await {
             let cache = self.cache.read().await;
             if let Some((configs, _)) = cache.get(&cache_key) {
                 return Ok(configs.clone());
             }
         }
-        
+
         // Cache miss - fetch from database
         let configs = self.inner.get_configs_for_method(method).await?;
-        
+
         // Update cache
         let mut cache = self.cache.write().await;
         cache.insert(cache_key, (configs.clone(), Instant::now()));
-        
+
         Ok(configs)
     }
 
-    async fn create_config(&self, input: ErrorInjectionConfigInput) -> anyhow::Result<ErrorInjectionConfig> {
+    async fn create_config(
+        &self,
+        input: ErrorInjectionConfigInput,
+    ) -> anyhow::Result<ErrorInjectionConfig> {
         let result = self.inner.create_config(input).await?;
-        
+
         // Invalidate cache on write operations
         let mut cache = self.cache.write().await;
         cache.clear();
-        
+
         Ok(result)
     }
 
-    async fn update_config(&self, id: i32, input: ErrorInjectionConfigInput) -> anyhow::Result<ErrorInjectionConfig> {
+    async fn update_config(
+        &self,
+        id: i32,
+        input: ErrorInjectionConfigInput,
+    ) -> anyhow::Result<ErrorInjectionConfig> {
         let result = self.inner.update_config(id, input).await?;
-        
+
         // Invalidate cache on write operations
         let mut cache = self.cache.write().await;
         cache.clear();
-        
+
         Ok(result)
     }
 
     async fn delete_config(&self, id: i32) -> anyhow::Result<()> {
         let result = self.inner.delete_config(id).await;
-        
+
         // Invalidate cache on write operations
         let mut cache = self.cache.write().await;
         cache.clear();
-        
+
         result
     }
 }

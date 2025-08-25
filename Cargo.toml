@@ -7,6 +7,8 @@ members = [
     "backend",
     "observability-utils",
     "tests",
+    "tokio-otel-metrics",
+    "data-loader",
 ]
 
 [workspace.dependencies]
