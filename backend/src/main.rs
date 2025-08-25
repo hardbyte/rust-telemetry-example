@@ -1,6 +1,7 @@
 mod book_enrichment;
 mod book_ingestion;
 mod scheduled_tasks;
+mod search_refresh;
 
 use anyhow::Result;
 use book_ingestion::OutboxPublisherConfig;
@@ -17,6 +18,7 @@ use tracing::info;
 
 use bookapp_dal::BookRepositoryImpl;
 use sqlx::postgres::PgPoolOptions;
+use std::str::FromStr;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -50,6 +52,22 @@ async fn main() -> Result<()> {
 
     // Create repository for database operations
     let book_repository = Arc::new(BookRepositoryImpl::new(db_pool.clone(), db_pool.clone()));
+
+    // Configure smart search refresher
+    let min_interval_secs = std::env::var("SEARCH_REFRESH_MIN_INTERVAL_SECS")
+        .ok()
+        .and_then(|v| u64::from_str(&v).ok())
+        .unwrap_or(30);
+    let max_staleness_secs = std::env::var("SEARCH_REFRESH_MAX_STALENESS_SECS")
+        .ok()
+        .and_then(|v| u64::from_str(&v).ok())
+        .unwrap_or(300);
+    let search_refresher = Arc::new(search_refresh::SmartSearchRefresher::new(
+        min_interval_secs,
+        max_staleness_secs,
+    ));
+    // Register OTel observable gauges for refresher metrics
+    let _refresh_obs_regs = search_refresher.register_observables();
 
     // Kafka producer for outbox publishing
     let kafka_broker =
@@ -118,9 +136,10 @@ async fn main() -> Result<()> {
     let mut kafka_task = tokio::spawn({
         let mut rx = shutdown_rx.clone();
         let book_repository = book_repository.clone();
+        let search_refresher = search_refresher.clone();
         async move {
             tokio::select! {
-                res = book_ingestion::run_consumer(book_repository) => {
+                res = book_ingestion::run_consumer(book_repository, search_refresher) => {
                     if let Err(e) = res {
                         tracing::error!("Kafka consumer error: {:?}", e);
                     }
@@ -216,20 +235,7 @@ async fn main() -> Result<()> {
     let _ = scheduler_task.await;
     let _ = outbox_task.await;
 
-    info!("Shutting down OpenTelemetry");
-
-    // Shutdown OpenTelemetry providers
-    if let Err(e) = trace_provider.shutdown() {
-        tracing::error!("Error shutting down trace provider: {:?}", e);
-    }
-    if let Err(e) = meter_provider.shutdown() {
-        tracing::error!("Error shutting down meter provider: {:?}", e);
-    }
-    if let Err(e) = log_provider.shutdown() {
-        tracing::error!("Error shutting down log provider: {:?}", e);
-    }
-
-    // Keep Sentry guard alive until here
+    // OpenTelemetry Providers will be dropped on exit
     drop(sentry_guard);
 
     info!("Backend service shutdown complete");

@@ -13,6 +13,7 @@ observability-utils = { path = "../observability-utils" }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 opentelemetry = { workspace = true }
+once_cell = "1"
 
 # Kafka client
 rdkafka = { version = "0.37.0", features = ["tracing"] }

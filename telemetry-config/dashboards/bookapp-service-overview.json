@@ -31,7 +31,7 @@
       },
       "id": 100,
       "panels": [],
-      "title": "🎯 Service Health & Status",
+      "title": "\ud83c\udfaf Service Health & Status",
       "type": "row"
     },
     {
@@ -362,7 +362,7 @@
       },
       "id": 120,
       "panels": [],
-      "title": "🐳 Container Resources",
+      "title": "\ud83d\udc33 Container Resources",
       "type": "row"
     },
     {
@@ -843,7 +843,7 @@
       },
       "id": 101,
       "panels": [],
-      "title": "🚀 HTTP Performance Metrics",
+      "title": "\ud83d\ude80 HTTP Performance Metrics",
       "type": "row"
     },
     {
@@ -1150,7 +1150,7 @@
       },
       "id": 102,
       "panels": [],
-      "title": "🔍 Operational Insights",
+      "title": "\ud83d\udd0d Operational Insights",
       "type": "row"
     },
     {
@@ -1639,7 +1639,7 @@
       },
       "id": 103,
       "panels": [],
-      "title": "📊 Business Metrics",
+      "title": "\ud83d\udcca Business Metrics",
       "type": "row"
     },
     {
@@ -1652,7 +1652,7 @@
       },
       "id": 105,
       "panels": [],
-      "title": "📈 Data Ingestion & Processing",
+      "title": "\ud83d\udcc8 Data Ingestion & Processing",
       "type": "row"
     },
     {
@@ -1863,7 +1863,7 @@
       },
       "id": 104,
       "panels": [],
-      "title": "🔍 Logs & Traces",
+      "title": "\ud83d\udd0d Logs & Traces",
       "type": "row"
     },
     {
@@ -2025,7 +2025,7 @@
       },
       "id": 106,
       "panels": [],
-      "title": "⚙️ Tokio Runtime Metrics",
+      "title": "\u2699\ufe0f Tokio Runtime Metrics",
       "type": "row"
     },
     {
@@ -2429,7 +2429,7 @@
       },
       "id": 120,
       "panels": [],
-      "title": "📋 Tokio Task Details (Real Console Data)",
+      "title": "\ud83d\udccb Tokio Task Details (Real Console Data)",
       "type": "row"
     },
     {
@@ -2838,7 +2838,7 @@
       },
       "id": 125,
       "panels": [],
-      "title": "🔍 Task Pattern Analysis",
+      "title": "\ud83d\udd0d Task Pattern Analysis",
       "type": "row"
     },
     {
@@ -2889,7 +2889,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-9
+          "le": 1e-09
         },
         "legend": {
           "show": false
@@ -3100,6 +3100,251 @@
         }
       ],
       "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 25
+      },
+      "id": 901,
+      "panels": [],
+      "title": "\ud83d\udd0e Search Refresh",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "req/s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 26
+      },
+      "id": 902,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(search_refresh_executed_total[5m]))",
+          "legendFormat": "executed",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(search_refresh_requests_total[5m]))",
+          "legendFormat": "requests",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Search Refresh Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "req/s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 26
+      },
+      "id": 903,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "stacking": "normal"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (reason)(rate(search_refresh_skipped_total[5m]))",
+          "legendFormat": "{{reason}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Refresh Skips by Reason",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 26
+      },
+      "id": 904,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.5, sum by (le)(rate(search_refresh_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.9, sum by (le)(rate(search_refresh_duration_seconds_bucket[5m])))",
+          "legendFormat": "p90",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum by (le)(rate(search_refresh_duration_seconds_bucket[5m])))",
+          "legendFormat": "p99",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Refresh Duration (p50/p90/p99)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 32
+      },
+      "id": 905,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(search_refresh_pending_updates)",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Search Pending Updates",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 32
+      },
+      "id": 906,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "time() - sum(search_refresh_last_refresh_timestamp_seconds)",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Last Refresh Age (s)",
+      "type": "stat"
     }
   ],
   "preload": false,

@@ -148,6 +148,7 @@ async fn publish_event(producer: &FutureProducer, topic: &str, event: &Event) ->
     }
 }
 use bookapp_dal::BookRepositoryImpl;
+use crate::search_refresh::{RefreshDecision, SmartSearchRefresher};
 use opentelemetry::global;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::trace::TraceContextExt;
@@ -188,30 +189,55 @@ impl Extractor for HeaderExtractor<'_> {
     }
 }
 
-#[tracing::instrument(skip(book_repository), fields(book_id))]
+#[tracing::instrument(skip(book_repository, search_refresher), fields(book_id, search_refresh.decision))]
 async fn background_process_new_book(
     book_id: i32,
     book_repository: Arc<BookRepositoryImpl>,
+    search_refresher: Arc<SmartSearchRefresher>,
 ) -> Result<()> {
     info!(
         book_id = book_id,
         "Starting background processing for new book"
     );
 
-    // Refresh the search materialized view to include the new book
-    // This ensures the book is immediately available in full-text search
-    if let Err(e) = refresh_search_materialized_view_for_new_book(book_repository.clone()).await {
-        error!(
-            book_id = book_id,
-            error = %e,
-            "Failed to refresh search view for new book"
-        );
-        // Don't fail the entire process if view refresh fails
-    } else {
-        info!(
-            book_id = book_id,
-            "Successfully refreshed search view for new book"
-        );
+    // Notify the smart refresher and attempt a smart refresh
+    search_refresher.notify_book_changed();
+    match search_refresher
+        .maybe_refresh(book_repository.clone())
+        .await
+    {
+        Ok(decision) => {
+            tracing::Span::current().record(
+                "search_refresh.decision",
+                format!("{:?}", decision),
+            );
+            match decision {
+                RefreshDecision::Refreshed {
+                    duration,
+                    rows_affected,
+                } => {
+                    info!(
+                        book_id = book_id,
+                        refresh_duration_ms = duration.as_millis(),
+                        rows_affected = rows_affected,
+                        "Search index refreshed for new book"
+                    );
+                }
+                RefreshDecision::Skip(reason) => {
+                    info!(book_id = book_id, reason = %reason, "Search index refresh skipped");
+                }
+                RefreshDecision::Refresh => {
+                    warn!(book_id = book_id, "Unexpected refresh decision state");
+                }
+            }
+        }
+        Err(e) => {
+            error!(
+                book_id = book_id,
+                error = %e,
+                "Search index refresh failed, continuing with book processing"
+            );
+        }
     }
 
     // Additional background processing could include:
@@ -223,59 +249,6 @@ async fn background_process_new_book(
     info!(
         book_id = book_id,
         "Completed background processing for new book"
-    );
-
-    Ok(())
-}
-
-/// Refreshes the book search materialized view after new book creation
-/// This ensures new books are immediately available in full-text search results
-#[tracing::instrument(
-    skip(book_repository),
-    fields(
-        operation = "refresh_materialized_view",
-        view.name = "book_search_view",
-        view.refresh_type = "concurrent",
-        view.refresh_duration_ms,
-        view.rows_affected,
-        maintenance.type = "event_driven"
-    )
-)]
-async fn refresh_search_materialized_view_for_new_book(
-    book_repository: Arc<BookRepositoryImpl>,
-) -> Result<()> {
-    let start_time = std::time::Instant::now();
-
-    info!(
-        view.name = "book_search_view",
-        operation = "refresh_materialized_view",
-        "Starting materialized view refresh for new book"
-    );
-
-    // Access the write pool directly for this database maintenance operation
-    let pool = book_repository.write_pool();
-
-    // Refresh the materialized view concurrently (non-blocking for reads)
-    let result = sqlx::query("REFRESH MATERIALIZED VIEW CONCURRENTLY book_search_view")
-        .execute(pool.as_ref())
-        .await?;
-
-    let refresh_duration = start_time.elapsed();
-    let rows_affected = result.rows_affected();
-
-    // Record span attributes
-    tracing::Span::current().record(
-        "view.refresh_duration_ms",
-        refresh_duration.as_millis() as u64,
-    );
-    tracing::Span::current().record("view.rows_affected", rows_affected);
-
-    info!(
-        view.name = "book_search_view",
-        view.refresh_duration_ms = refresh_duration.as_millis(),
-        view.rows_affected = rows_affected,
-        operation = "refresh_materialized_view",
-        "Materialized view refresh completed for new book"
     );
 
     Ok(())
@@ -299,7 +272,10 @@ pub fn create_consumer() -> Result<StreamConsumer> {
     Ok(consumer)
 }
 
-pub async fn run_consumer(book_repository: Arc<BookRepositoryImpl>) -> Result<()> {
+pub async fn run_consumer(
+    book_repository: Arc<BookRepositoryImpl>,
+    search_refresher: Arc<SmartSearchRefresher>,
+) -> Result<()> {
     let consumer = create_consumer()?;
 
     consumer.subscribe(&["book_ingestion"])?;
@@ -372,6 +348,7 @@ pub async fn run_consumer(book_repository: Arc<BookRepositoryImpl>) -> Result<()
                             if let Err(e) = background_process_new_book(
                                 book_message.book_id,
                                 book_repository.clone(),
+                                search_refresher.clone(),
                             )
                             .await
                             {

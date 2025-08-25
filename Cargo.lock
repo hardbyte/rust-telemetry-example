@@ -459,6 +459,7 @@ dependencies = [
  "chrono",
  "dotenv",
  "observability-utils",
+ "once_cell",
  "opentelemetry 0.30.0",
  "rdkafka",
  "serde",
