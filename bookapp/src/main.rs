@@ -2,7 +2,7 @@ mod book_details;
 #[allow(dead_code)]
 mod book_ingestion;
 mod database;
-mod db;
+
 mod error_injection_middleware;
 #[cfg(test)]
 mod observability_tests;
@@ -12,12 +12,12 @@ mod rest;
 mod rest_tests;
 mod topic_management;
 
-use crate::book_details::{BookDetailsProvider, RemoteBookDetailsProvider};
-use std::sync::Arc;
+use std::time::Duration;
 
-use anyhow::{Ok, Result};
+use anyhow::Result;
 use axum::{Extension, Json, Router};
 use axum_tracing_opentelemetry::middleware::{OtelAxumLayer, OtelInResponseLayer};
+use opentelemetry::metrics::MeterProvider;
 use rdkafka::producer::FutureProducer;
 use sentry_tower::NewSentryLayer;
 use serde_json::{json, Value};
@@ -40,17 +40,16 @@ fn router(db_pools: DatabasePools, producer: FutureProducer) -> Router {
         error_injection_middleware::PostgresErrorInjectionConfigStore::new(
             db_pools.write_pool.clone(),
         ),
-    ) as std::sync::Arc<dyn error_injection_middleware::ErrorInjectionConfigStore>;
-    
+    )
+        as std::sync::Arc<dyn error_injection_middleware::ErrorInjectionConfigStore>;
+
     let error_injection_store = std::sync::Arc::new(
         error_injection_middleware::CachedErrorInjectionConfigStore::new(postgres_store),
-    ) as std::sync::Arc<dyn error_injection_middleware::ErrorInjectionConfigStore>;
+    )
+        as std::sync::Arc<dyn error_injection_middleware::ErrorInjectionConfigStore>;
 
     Router::new()
-        .merge(rest::api_router())
-        .layer(Extension(
-            Arc::new(RemoteBookDetailsProvider) as Arc<dyn BookDetailsProvider>
-        ))
+        .merge(rest::openapi_router())
         .layer(Extension(producer))
         // Our custom error injection layer can inject errors
         // This layer itself can be traced - so needs to be added before our OtelAxumLayer
@@ -96,27 +95,63 @@ async fn main() -> Result<()> {
     let enable_kafka_producer =
         std::env::var("ENABLE_KAFKA_PRODUCER").unwrap_or_else(|_| "false".to_string()) == "true";
 
-    let observability_config = observability_utils::ObservabilityConfig::new("bookapp")
-        .with_console_port(6669);
+    let observability_config =
+        observability_utils::ObservabilityConfig::new("bookapp").with_console_port(6669);
     let (trace_provider, meter_provider, log_provider, sentry_guard) =
         observability_utils::init_tracing(observability_config.clone());
+
+    info!("Tracing initialized successfully");
+
+    // Initialize Tokio metrics collection
+    if let Ok(tokio_registrations) =
+        observability_utils::start_tokio_metrics(&observability_config, &meter_provider)
+    {
+        info!(
+            "Successfully initialized {} Tokio metric registrations",
+            tokio_registrations.len()
+        );
+    } else {
+        info!("Failed to initialize Tokio metrics");
+    }
+
+    if let Ok(task_registrations) =
+        observability_utils::start_task_metrics(&observability_config, &meter_provider)
+    {
+        info!(
+            "Successfully initialized {} task metric registrations",
+            task_registrations.len()
+        );
+    } else {
+        info!("Failed to initialize task metrics");
+    }
 
     // Init db
     info!("Setting up Database");
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    // Increase pool size for development with multiple services
+    // High-throughput database pool configuration
     let db_config = database::DatabaseConfig {
-        max_connections: 20, // Increased from default 10
-        min_connections: 5,  // Increased from default 2
-        ..Default::default()
+        max_connections: 100, // Significantly increased for high throughput
+        min_connections: 20,  // Higher minimum to avoid cold start delays
+        acquire_timeout: Duration::from_secs(1), // Faster timeout for high throughput
+        idle_timeout: Duration::from_secs(30), // Reduced idle timeout
+        max_lifetime: Duration::from_secs(600), // Reduced lifetime for connection health
     };
     let db_pools = DatabasePools::single(&db_url, Some(db_config)).await?;
 
-    // Start tokio runtime metrics collection
-    let _tokio_metrics_handle = observability_utils::start_tokio_metrics(&observability_config, &meter_provider);
-    
-    // Start tokio task-level metrics collection
-    let _task_metrics_handle = observability_utils::start_task_metrics(&observability_config, &meter_provider);
+    info!("Creating simple test metrics to debug OTLP export...");
+
+    // Create a simple counter that should definitely work
+    let test_meter = meter_provider.meter("debug_test");
+    let simple_counter = test_meter.u64_counter("debug_simple_counter").build();
+    simple_counter.add(42, &[]);
+    info!("Created simple counter with value 42");
+
+    // Force a metric export immediately
+    if let Err(e) = meter_provider.force_flush() {
+        info!("Error force-flushing metrics: {:?}", e);
+    } else {
+        info!("Successfully force-flushed metrics");
+    }
 
     // Create Kafka admin client
     let admin_client = topic_management::create_admin_client()?;

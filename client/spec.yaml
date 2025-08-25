@@ -1,13 +1,13 @@
 openapi: 3.0.3
 info:
   title: Book Service API
-  description: API for managing books in the library.
+  description: API for managing books in the library with distributed tracing support
   version: "1.0.0"
 servers:
-  - url: http://localhost:3000
-    description: Local server
+  - url: http://localhost:8000
+    description: Local development server
 paths:
-  /books/:
+  /books:
     get:
       summary: Get all books
       operationId: getAllBooks
@@ -38,15 +38,15 @@ paths:
             schema:
               $ref: '#/components/schemas/BookCreateIn'
       responses:
-        '200':
+        '201':
           description: ID of the newly created book
           content:
-            application/json:
+            text/plain:
               schema:
                 type: integer
-                example: 1
-        '404':
-          description: Not found
+                format: int32
+        '422':
+          description: Validation error
   /books/{id}:
     get:
       summary: Get a book by ID
@@ -59,6 +59,7 @@ paths:
           required: true
           schema:
             type: integer
+            format: int32
           description: ID of the book
       responses:
         '200':
@@ -80,6 +81,7 @@ paths:
           required: true
           schema:
             type: integer
+            format: int32
           description: ID of the book
       requestBody:
         description: Data to update the book
@@ -92,10 +94,10 @@ paths:
         '200':
           description: ID of the updated book
           content:
-            application/json:
+            text/plain:
               schema:
                 type: integer
-                example: 1
+                format: int32
         '404':
           description: Book not found
     delete:
@@ -109,32 +111,102 @@ paths:
           required: true
           schema:
             type: integer
+            format: int32
           description: ID of the book
       responses:
         '200':
           description: Book deleted successfully
         '404':
           description: Book not found
+  /books/search:
+    get:
+      summary: Search books
+      operationId: searchBooks
+      tags:
+        - Books
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Search query
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          description: Maximum results
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BookSearchResult'
 components:
   schemas:
     Book:
       type: object
+      required:
+        - id
+        - work_id
+        - work_title
+        - primary_author_id
+        - primary_author_name
+        - status
       properties:
         id:
           type: integer
-          example: 1
-        author:
+          format: int32
+        work_id:
+          type: integer
+          format: int32
+        work_title:
           type: string
-          example: "George Orwell"
-        title:
+        primary_author_id:
+          type: integer
+          format: int32
+        primary_author_name:
           type: string
-          example: "1984"
+        status:
+          type: string
+          enum: [Available, Borrowed, Lost]
     BookCreateIn:
       type: object
+      required:
+        - work_title
       properties:
-        author:
+        work_title:
           type: string
-          example: "George Orwell"
-        title:
+        primary_author_name:
           type: string
-          example: "1984"
+        primary_author_id:
+          type: integer
+          format: int32
+        status:
+          type: string
+          enum: [Available, Borrowed, Lost]
+    BookSearchResult:
+      type: object
+      required:
+        - work_id
+        - work_title
+        - primary_author_name
+        - rank
+      properties:
+        work_id:
+          type: integer
+          format: int32
+        work_title:
+          type: string
+        primary_author_name:
+          type: string
+        rank:
+          type: number
+          format: float
+        headline:
+          type: string

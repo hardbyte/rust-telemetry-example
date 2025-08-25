@@ -1,7 +1,5 @@
 use crate::sentry_correlation::SentryOtelCorrelationLayer;
-use crate::tokio_metrics::TokioRuntimeMetrics;
-use crate::tokio_task_metrics::TokioTaskMetrics;
-use std::panic;
+use opentelemetry::metrics::MeterProvider;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry_otlp::{LogExporter, WithExportConfig};
 use opentelemetry_sdk::logs::SdkLoggerProvider;
@@ -16,12 +14,9 @@ use tracing_subscriber::Layer;
 #[derive(Debug, Clone)]
 pub struct ObservabilityConfig {
     pub service_name: String,
-    pub console_subscriber_port: u16,
-    pub enable_console_subscriber: bool,
     pub enable_tokio_metrics: bool,
     pub tokio_metrics_interval: std::time::Duration,
-    pub enable_task_metrics: bool,
-    pub task_metrics_interval: std::time::Duration,
+    pub console_port: Option<u16>,
 }
 
 impl ObservabilityConfig {
@@ -29,25 +24,10 @@ impl ObservabilityConfig {
     pub fn new(service_name: impl Into<String>) -> Self {
         Self {
             service_name: service_name.into(),
-            console_subscriber_port: 6669,
-            enable_console_subscriber: true,
             enable_tokio_metrics: true,
             tokio_metrics_interval: std::time::Duration::from_secs(5),
-            enable_task_metrics: true,
-            task_metrics_interval: std::time::Duration::from_secs(10),
+            console_port: None,
         }
-    }
-
-    /// Set the console subscriber port
-    pub fn with_console_port(mut self, port: u16) -> Self {
-        self.console_subscriber_port = port;
-        self
-    }
-
-    /// Disable console subscriber
-    pub fn without_console_subscriber(mut self) -> Self {
-        self.enable_console_subscriber = false;
-        self
     }
 
     /// Enable or disable tokio runtime metrics collection
@@ -62,27 +42,28 @@ impl ObservabilityConfig {
         self
     }
 
-    /// Enable or disable task-level metrics collection
-    pub fn with_task_metrics(mut self, enabled: bool) -> Self {
-        self.enable_task_metrics = enabled;
-        self
-    }
-
-    /// Set the interval for task metrics collection
-    pub fn with_task_metrics_interval(mut self, interval: std::time::Duration) -> Self {
-        self.task_metrics_interval = interval;
+    /// Set the console port for tokio-console
+    pub fn with_console_port(mut self, port: u16) -> Self {
+        self.console_port = Some(port);
         self
     }
 }
 
-fn init_meter_provider(service_name: &str) -> Result<SdkMeterProvider, opentelemetry_otlp::ExporterBuildError> {
+fn init_meter_provider(
+    service_name: &str,
+) -> Result<SdkMeterProvider, opentelemetry_otlp::ExporterBuildError> {
     let exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_tonic()
-        .with_timeout(std::time::Duration::from_secs(10))
+        .with_timeout(std::time::Duration::from_secs(5))
         .build()?;
 
+    // Configure metrics collection with reasonable intervals
+    let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
+        .with_interval(std::time::Duration::from_secs(10)) // Export every 10 seconds
+        .build();
+
     let provider = SdkMeterProvider::builder()
-        .with_periodic_exporter(exporter)
+        .with_reader(reader)
         .with_resource(
             opentelemetry_sdk::Resource::builder()
                 .with_attributes(vec![opentelemetry::KeyValue::new(
@@ -99,15 +80,31 @@ fn init_meter_provider(service_name: &str) -> Result<SdkMeterProvider, opentelem
 }
 
 fn init_logger_provider() -> Result<SdkLoggerProvider, opentelemetry_otlp::ExporterBuildError> {
-    let exporter = LogExporter::builder().with_tonic().build()?;
+    let exporter = LogExporter::builder()
+        .with_tonic()
+        .with_timeout(std::time::Duration::from_secs(5))
+        .build()?;
+
+    // Configure log processor with safe batch limits
+    let batch_config = opentelemetry_sdk::logs::BatchConfigBuilder::default()
+        .with_max_queue_size(512) // Reduced queue size
+        .with_scheduled_delay(std::time::Duration::from_millis(500)) // Faster export
+        .with_max_export_batch_size(256) // Smaller batches
+        .build();
+
+    let batch_processor = opentelemetry_sdk::logs::BatchLogProcessor::builder(exporter)
+        .with_batch_config(batch_config)
+        .build();
 
     Ok(SdkLoggerProvider::builder()
-        .with_batch_exporter(exporter)
+        .with_log_processor(batch_processor)
         .build())
 }
 
 /// Initialize tracing, metrics, logging, and Sentry with the given configuration
-pub fn init_tracing(config: ObservabilityConfig) -> (
+pub fn init_tracing(
+    config: ObservabilityConfig,
+) -> (
     SdkTracerProvider,
     SdkMeterProvider,
     SdkLoggerProvider,
@@ -115,7 +112,8 @@ pub fn init_tracing(config: ObservabilityConfig) -> (
 ) {
     let environment =
         std::env::var("SENTRY_ENVIRONMENT").unwrap_or_else(|_| "development".to_string());
-    let release = std::env::var("SENTRY_RELEASE").unwrap_or_else(|_| format!("{}@dev", config.service_name));
+    let release =
+        std::env::var("SENTRY_RELEASE").unwrap_or_else(|_| format!("{}@dev", config.service_name));
 
     // Initialize Sentry
     let sentry_dsn = std::env::var("SENTRY_DSN").unwrap_or_else(|_| {
@@ -177,11 +175,23 @@ pub fn init_tracing(config: ObservabilityConfig) -> (
     // Tracing
     let exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_tonic()
+        .with_timeout(std::time::Duration::from_secs(5))
         .build()
         .expect("Failed to create OTLP span exporter");
 
+    // Configure BatchSpanProcessor with safe limits to prevent stack overflow
+    let batch_config = opentelemetry_sdk::trace::BatchConfigBuilder::default()
+        .with_max_queue_size(512) // Reduced from default 2048 to prevent memory overflow
+        .with_scheduled_delay(std::time::Duration::from_millis(500)) // Faster export to reduce queue buildup
+        .with_max_export_batch_size(256) // Smaller batches for more predictable memory usage
+        .build();
+
+    let batch_processor = opentelemetry_sdk::trace::BatchSpanProcessor::builder(exporter)
+        .with_batch_config(batch_config)
+        .build();
+
     let tracer_provider = SdkTracerProvider::builder()
-        .with_batch_exporter(exporter)
+        .with_span_processor(batch_processor)
         .with_resource(
             opentelemetry_sdk::Resource::builder()
                 .with_attributes(vec![opentelemetry::KeyValue::new(
@@ -224,11 +234,12 @@ pub fn init_tracing(config: ObservabilityConfig) -> (
 
     // Layer that directly sends log events to OTEL
     let log_provider = init_logger_provider().unwrap();
-    let otel_log_filter =
-        tracing_subscriber::EnvFilter::new("info,backend=debug,bookapp=debug,observability_utils=debug,sqlx=info")
-            .add_directive("hyper=error".parse().unwrap())
-            .add_directive("tonic=error".parse().unwrap())
-            .add_directive("reqwest=error".parse().unwrap());
+    let otel_log_filter = tracing_subscriber::EnvFilter::new(
+        "info,backend=debug,bookapp=debug,observability_utils=debug,sqlx=info",
+    )
+    .add_directive("hyper=error".parse().unwrap())
+    .add_directive("tonic=error".parse().unwrap())
+    .add_directive("reqwest=error".parse().unwrap());
 
     let otel_log_layer =
         opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&log_provider)
@@ -245,14 +256,7 @@ pub fn init_tracing(config: ObservabilityConfig) -> (
         });
 
     // Build the subscriber by combining layers
-    // Note: We always include console subscriber for simplicity, just with different ports
     let subscriber = tracing_subscriber::Registry::default()
-        .with(
-            console_subscriber::ConsoleLayer::builder()
-                .with_default_env()
-                .server_addr(([0, 0, 0, 0], config.console_subscriber_port))
-                .spawn(),
-        )
         .with(tracing_opentelemetry_layer)
         .with(SentryOtelCorrelationLayer::new())
         .with(sentry_layer)
@@ -265,55 +269,66 @@ pub fn init_tracing(config: ObservabilityConfig) -> (
     (tracer_provider, meter_provider, log_provider, sentry_guard)
 }
 
-/// Start tokio runtime metrics collection
-pub fn start_tokio_metrics(config: &ObservabilityConfig, meter_provider: &SdkMeterProvider) -> Option<tokio::task::JoinHandle<()>> {
-    if config.enable_tokio_metrics {
-        tracing::info!("Starting Tokio runtime metrics collection for service: {}", config.service_name);
-        
-        // Test if we can access runtime metrics immediately
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) => {
-                let metrics = handle.metrics();
-                tracing::info!(
-                    "Tokio runtime accessible: workers={}, alive_tasks={}", 
-                    metrics.num_workers(), 
-                    metrics.num_alive_tasks()
-                );
-            }
-            Err(_) => {
-                tracing::warn!("Tokio runtime not accessible during metrics init");
-                return None;
-            }
-        }
-        
-        let runtime_metrics = TokioRuntimeMetrics::new(config.service_name.clone(), meter_provider);
-        Some(runtime_metrics.start_collection(config.tokio_metrics_interval))
-    } else {
-        tracing::info!("Tokio runtime metrics disabled for service: {}", config.service_name);
-        None
-    }
+/// Initialize tokio runtime metrics collection using our enhanced implementation
+pub fn init_tokio_runtime_metrics(
+    meter_provider: &SdkMeterProvider,
+) -> Result<Vec<crate::ObservableRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+    use crate::TokioRuntimeMetrics;
+
+    let meter = meter_provider.meter("tokio_runtime");
+
+    // Register tokio runtime metrics using our enhanced implementation
+    let registrations = TokioRuntimeMetrics::register(&meter)?;
+
+    tracing::info!(
+        "Enhanced Tokio runtime metrics registered successfully ({} callbacks)",
+        registrations.len()
+    );
+    Ok(registrations)
 }
 
-/// Start tokio task-level metrics collection
-pub fn start_task_metrics(config: &ObservabilityConfig, meter_provider: &SdkMeterProvider) -> Option<tokio::task::JoinHandle<()>> {
-    // Always log to ensure function is being called
-    tracing::info!("Task metrics function called - enabled: {} for service: {}", 
-        config.enable_task_metrics, config.service_name);
-    
-    if config.enable_task_metrics {
-        tracing::info!("Starting Tokio task-level metrics collection for service: {} on port {}", 
-            config.service_name, config.console_subscriber_port);
-        
-        let task_metrics = TokioTaskMetrics::new(
-            config.service_name.clone(), 
-            config.console_subscriber_port,
-            meter_provider
-        );
-        let handle = task_metrics.start_collection(config.task_metrics_interval);
-        tracing::info!("Task metrics collection started successfully for {}", config.service_name);
-        Some(handle)
-    } else {
-        tracing::info!("Tokio task-level metrics disabled for service: {}", config.service_name);
-        None
+/// Start Tokio runtime metrics collection
+pub fn start_tokio_metrics(
+    config: &ObservabilityConfig,
+    meter_provider: &SdkMeterProvider,
+) -> Result<Vec<crate::ObservableRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+    tracing::info!(
+        "start_tokio_metrics called with enable_tokio_metrics={}",
+        config.enable_tokio_metrics
+    );
+
+    if !config.enable_tokio_metrics {
+        tracing::info!("Tokio metrics collection disabled by configuration");
+        return Ok(Vec::new());
     }
+
+    // Create a simple test counter to verify OpenTelemetry metrics are working
+    tracing::info!("Creating test counter...");
+    let test_meter = meter_provider.meter("test_metrics");
+    let test_counter = test_meter.u64_counter("test_counter").build();
+    test_counter.add(1, &[]);
+    tracing::info!("Created test counter metric with value 1");
+
+    tracing::info!("Calling init_tokio_runtime_metrics...");
+    let result = init_tokio_runtime_metrics(meter_provider);
+    tracing::info!("init_tokio_runtime_metrics result: {:?}", result.is_ok());
+    result
+}
+
+/// Start task-level metrics collection
+pub fn start_task_metrics(
+    _config: &ObservabilityConfig,
+    meter_provider: &SdkMeterProvider,
+) -> Result<Vec<crate::ObservableRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+    use crate::TaskMetrics;
+
+    let meter = meter_provider.meter("tokio_tasks");
+    let task_metrics = TaskMetrics::new();
+    let registrations = task_metrics.register_metrics(&meter)?;
+
+    tracing::info!(
+        "Task-level metrics registered successfully ({} callbacks)",
+        registrations.len()
+    );
+    Ok(registrations)
 }

@@ -1,6 +1,6 @@
 //! Sentry-OpenTelemetry correlation layer for cross-platform trace correlation.
 //!
-//! This module provides a custom tracing subscriber layer that enables seamless correlation
+//! This module provides a custom tracing subscriber layer that enables correlation
 //! between Sentry error tracking and OpenTelemetry distributed tracing by automatically
 //! adding OpenTelemetry trace and span IDs as tags to Sentry events.
 //!

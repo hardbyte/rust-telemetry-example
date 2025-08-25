@@ -618,7 +618,6 @@ mod tests {
         let books = repo.find_all().await.unwrap();
 
         assert!(!books.is_empty());
-        assert!(books.len() >= 1);
     }
 
     #[sqlx::test]

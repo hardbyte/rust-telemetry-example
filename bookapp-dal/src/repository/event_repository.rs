@@ -46,9 +46,9 @@ impl EventRepositoryImpl {
         let row = sqlx::query!(
             r#"
             INSERT INTO events
-                (aggregate_type, aggregate_id, event_type, payload, headers, trace_id, span_id, source_service, version)
+                (aggregate_type, aggregate_id, event_type, payload, headers, trace_id, span_id, source_service, version, topic)
             VALUES
-                ($1,             $2,           $3,         $4,      $5,      $6,       $7,      $8,             $9)
+                ($1,             $2,           $3,         $4,      $5,      $6,       $7,      $8,             $9,      $10)
             RETURNING id
             "#,
             input.aggregate_type,
@@ -59,7 +59,8 @@ impl EventRepositoryImpl {
             input.trace_id,
             input.span_id,
             input.source_service,
-            version
+            version,
+            input.topic
         )
         .fetch_one(exec)
         .await?;

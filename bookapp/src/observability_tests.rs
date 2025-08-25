@@ -2,7 +2,6 @@
 mod observability_tests {
     use crate::book_details::{BookDetailsProvider, StubBookDetailsProvider};
     use crate::database::DatabasePools;
-    use crate::db::BookRepositoryImpl;
     use axum::{
         body::Body,
         http::{Request, StatusCode},
@@ -10,6 +9,7 @@ mod observability_tests {
     };
     use bookapp_dal::models::{BookCreateInput, BookStatus};
     use bookapp_dal::repository::traits::BookRepository;
+    use bookapp_dal::repository::BookRepositoryImpl;
     use dotenv::dotenv;
     use rdkafka::producer::FutureProducer;
     use serde_json::Value;

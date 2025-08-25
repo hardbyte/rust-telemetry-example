@@ -14,11 +14,17 @@ opentelemetry-otlp = { version = "0.30.0", features = [
     "grpc-tonic",
 ] }
 opentelemetry_sdk = { version = "0.30.0", features = ["trace", "opentelemetry-http", "rt-tokio"] }
+procfs = { version = "0.17", optional = true }
+page_size = { version = "0.6", optional = true }
+# runtime-otel-metrics = "0.2.0"  # Version conflict with OpenTelemetry 0.30
+
 sentry = { version = "0.41", features = ["tower", "tracing", "opentelemetry", "logs"] }
-tokio = { version = "1.46.1", features = ["full"] }
+tokio = { version = "1.47.1", features = ["full"] }
+tokio-otel-metrics = { path = "../tokio-otel-metrics" }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true, features = ["async-trait"] }
 tracing-subscriber = { version = "0.3.19", features = ["fmt", "env-filter", "json", "tracing-log"] }
-console-subscriber = "0.4.1"
-console-api = "0.8.1"
-tonic = "0.12.3"
+
+[features]
+default = []
+memory-metrics = ["procfs", "page_size"]

@@ -7,15 +7,6 @@ use tracing::{error, info, instrument};
 
 use crate::book_enrichment::BookEnrichmentService;
 
-/// Starts the scheduler for periodic background tasks
-#[instrument(skip(book_repository))]
-pub async fn start_scheduler(book_repository: Arc<BookRepositoryImpl>) -> Result<()> {
-    // Backward-compatible behavior: create a shutdown channel that never triggers.
-    // Callers that need cooperative shutdown should use `start_scheduler_with_shutdown`.
-    let (_tx, rx) = watch::channel::<bool>(false);
-    start_scheduler_with_shutdown(book_repository, rx).await
-}
-
 #[instrument(skip(book_repository, shutdown))]
 pub async fn start_scheduler_with_shutdown(
     book_repository: Arc<BookRepositoryImpl>,
@@ -281,13 +272,14 @@ mod tests {
 
         // Verify the function signature supports error handling
         // This is a compile-time check that the error handling pattern is in place
+        #[allow(clippy::type_complexity)]
         let _: fn(
             Arc<BookRepositoryImpl>,
-        )
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>> =
-            |repo| Box::pin(refresh_search_materialized_view(repo));
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<()>> + Send>,
+        > = |repo| Box::pin(refresh_search_materialized_view(repo));
 
-        assert!(true, "Error handling pattern is correctly implemented");
+        // Error handling pattern is correctly implemented - verified at compile-time
     }
 
     #[test]

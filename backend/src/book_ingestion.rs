@@ -25,7 +25,7 @@ pub async fn start_outbox_publisher(
     pool: Arc<PgPool>,
     producer: FutureProducer,
     config: OutboxPublisherConfig,
-    mut shutdown: watch::Receiver<bool>,
+    shutdown: watch::Receiver<bool>,
 ) -> Result<()> {
     let repo = EventRepositoryImpl::single_pool(pool.clone());
 
@@ -45,10 +45,12 @@ pub async fn start_outbox_publisher(
             batch_size = %config.batch_size,
             otel.kind = "internal"
         );
-        
-        let result = cycle_span.in_scope(|| async {
-            publish_unpublished_events(&repo, pool.as_ref(), &producer, &config).await
-        }).await;
+
+        let result = cycle_span
+            .in_scope(|| async {
+                publish_unpublished_events(&repo, pool.as_ref(), &producer, &config).await
+            })
+            .await;
 
         match result {
             Ok(count) => {
@@ -186,30 +188,94 @@ impl Extractor for HeaderExtractor<'_> {
     }
 }
 
-#[tracing::instrument(skip(_book_repository), fields(book_id))]
+#[tracing::instrument(skip(book_repository), fields(book_id))]
 async fn background_process_new_book(
     book_id: i32,
-    _book_repository: Arc<BookRepositoryImpl>,
+    book_repository: Arc<BookRepositoryImpl>,
 ) -> Result<()> {
     info!(
         book_id = book_id,
         "Starting background processing for new book"
     );
 
-    // Simulate some background processing
-    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    // Refresh the search materialized view to include the new book
+    // This ensures the book is immediately available in full-text search
+    if let Err(e) = refresh_search_materialized_view_for_new_book(book_repository.clone()).await {
+        error!(
+            book_id = book_id,
+            error = %e,
+            "Failed to refresh search view for new book"
+        );
+        // Don't fail the entire process if view refresh fails
+    } else {
+        info!(
+            book_id = book_id,
+            "Successfully refreshed search view for new book"
+        );
+    }
 
-    // Example: Update book metadata or status
-    // In a real application, this might:
+    // Additional background processing could include:
     // - Fetch additional metadata from external APIs
     // - Perform content analysis
     // - Generate thumbnails or previews
     // - Send notifications to subscribers
-    // - Update search indexes
 
     info!(
         book_id = book_id,
         "Completed background processing for new book"
+    );
+
+    Ok(())
+}
+
+/// Refreshes the book search materialized view after new book creation
+/// This ensures new books are immediately available in full-text search results
+#[tracing::instrument(
+    skip(book_repository),
+    fields(
+        operation = "refresh_materialized_view",
+        view.name = "book_search_view",
+        view.refresh_type = "concurrent",
+        view.refresh_duration_ms,
+        view.rows_affected,
+        maintenance.type = "event_driven"
+    )
+)]
+async fn refresh_search_materialized_view_for_new_book(
+    book_repository: Arc<BookRepositoryImpl>,
+) -> Result<()> {
+    let start_time = std::time::Instant::now();
+
+    info!(
+        view.name = "book_search_view",
+        operation = "refresh_materialized_view",
+        "Starting materialized view refresh for new book"
+    );
+
+    // Access the write pool directly for this database maintenance operation
+    let pool = book_repository.write_pool();
+
+    // Refresh the materialized view concurrently (non-blocking for reads)
+    let result = sqlx::query("REFRESH MATERIALIZED VIEW CONCURRENTLY book_search_view")
+        .execute(pool.as_ref())
+        .await?;
+
+    let refresh_duration = start_time.elapsed();
+    let rows_affected = result.rows_affected();
+
+    // Record span attributes
+    tracing::Span::current().record(
+        "view.refresh_duration_ms",
+        refresh_duration.as_millis() as u64,
+    );
+    tracing::Span::current().record("view.rows_affected", rows_affected);
+
+    info!(
+        view.name = "book_search_view",
+        view.refresh_duration_ms = refresh_duration.as_millis(),
+        view.rows_affected = rows_affected,
+        operation = "refresh_materialized_view",
+        "Materialized view refresh completed for new book"
     );
 
     Ok(())

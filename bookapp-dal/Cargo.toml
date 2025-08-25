@@ -3,11 +3,15 @@ name = "bookapp-dal"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+
 [dependencies]
 anyhow = "1.0.98"
 async-trait = "0.1.84"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.141"
+utoipa = { version = "5.2", features = ["chrono"] }
 chrono = { version = "0.4.38", features = ["serde"] }
 sqlx = { version = "0.8.6", features = [
     "runtime-tokio",
