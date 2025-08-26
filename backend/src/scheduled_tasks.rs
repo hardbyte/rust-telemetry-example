@@ -4,17 +4,35 @@ use std::sync::Arc;
 use tokio::sync::watch;
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::{error, info, instrument};
+use opentelemetry::trace::TraceContextExt;
+use opentelemetry::KeyValue;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::book_enrichment::BookEnrichmentService;
+use crate::search_refresh::SmartSearchRefresher;
 
-#[instrument(skip(book_repository, shutdown))]
+#[instrument(
+    skip(book_repository, search_refresher, shutdown),
+    fields(
+        scheduler.type = "tokio_cron_scheduler",
+        scheduler.version = "0.14.0",
+        jobs.count,
+        startup_duration_ms
+    )
+)]
 pub async fn start_scheduler_with_shutdown(
     book_repository: Arc<BookRepositoryImpl>,
+    search_refresher: Arc<SmartSearchRefresher>,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<()> {
+    let startup_start = std::time::Instant::now();
+    
     info!("Starting scheduled tasks scheduler");
 
     let scheduler = JobScheduler::new().await?;
+    
+    // Get the parent span context to link scheduled jobs to startup
+    let parent_span_context = tracing::Span::current().context().span().span_context().clone();
 
     // Create enrichment service
     let enrichment_service = Arc::new(BookEnrichmentService::new(book_repository.clone()));
@@ -22,10 +40,58 @@ pub async fn start_scheduler_with_shutdown(
     // Schedule book enrichment to run every hour
     let enrichment_job = {
         let enrichment_service = enrichment_service.clone();
+        let startup_span_context = parent_span_context.clone();
         Job::new_async("0 0 * * * *", move |_uuid, _l| {
             let enrichment_service = enrichment_service.clone();
+            let startup_span_context = startup_span_context.clone();
             Box::pin(async move {
-                if let Err(e) = enrichment_service.enrich_all_books().await {
+                let span = tracing::info_span!(
+                    "scheduled_task_execution",
+                    task.name = "book_enrichment",
+                    task.schedule = "0 0 * * * *",
+                    task.type = "hourly",
+                    task.duration_ms = tracing::field::Empty,
+                    task.status = tracing::field::Empty
+                );
+                
+                // Link to the scheduler startup span
+                span.add_link_with_attributes(
+                    startup_span_context,
+                    vec![KeyValue::new("link.type", "follows_from")]
+                );
+                
+                let result = span.in_scope(|| async {
+                    let start_time = std::time::Instant::now();
+                    info!(task.name = "book_enrichment", "Starting scheduled book enrichment task");
+                    
+                    let result = enrichment_service.enrich_all_books().await;
+                    let duration = start_time.elapsed();
+                    
+                    tracing::Span::current().record("task.duration_ms", duration.as_millis() as u64);
+                    
+                    match result {
+                        Ok(()) => {
+                            tracing::Span::current().record("task.status", "success");
+                            info!(
+                                task.name = "book_enrichment",
+                                duration_ms = duration.as_millis(),
+                                "Book enrichment task completed successfully"
+                            );
+                        }
+                        Err(ref e) => {
+                            tracing::Span::current().record("task.status", "error");
+                            error!(
+                                task.name = "book_enrichment",
+                                duration_ms = duration.as_millis(),
+                                error = %e,
+                                "Book enrichment task failed"
+                            );
+                        }
+                    }
+                    result
+                }).await;
+                
+                if let Err(e) = result {
                     error!("Book enrichment job failed: {:?}", e);
                 }
             })
@@ -74,11 +140,62 @@ pub async fn start_scheduler_with_shutdown(
     // Schedule materialized view refresh (runs every 15 minutes)
     let search_view_refresh_job = {
         let book_repository = book_repository.clone();
+        let search_refresher = search_refresher.clone();
+        let startup_span_context = parent_span_context.clone();
         Job::new_async("0 */15 * * * *", move |_uuid, _l| {
             let book_repository = book_repository.clone();
+            let search_refresher = search_refresher.clone();
+            let startup_span_context = startup_span_context.clone();
             Box::pin(async move {
-                if let Err(e) = refresh_search_materialized_view(book_repository).await {
-                    error!("Search view refresh job failed: {:?}", e);
+                let span = tracing::info_span!(
+                    "scheduled_task_execution",
+                    task.name = "search_view_refresh",
+                    task.schedule = "0 */15 * * * *",
+                    task.type = "periodic",
+                    task.interval_minutes = 15,
+                    task.duration_ms = tracing::field::Empty,
+                    task.status = tracing::field::Empty
+                );
+                
+                // Link to the scheduler startup span
+                span.add_link_with_attributes(
+                    startup_span_context,
+                    vec![KeyValue::new("link.type", "follows_from")]
+                );
+                
+                let result = span.in_scope(|| async {
+                    let start_time = std::time::Instant::now();
+                    info!(task.name = "search_view_refresh", "Starting scheduled search view refresh");
+                    
+                    let result = search_refresher.force_refresh_for_schedule(book_repository).await;
+                    let duration = start_time.elapsed();
+                    
+                    tracing::Span::current().record("task.duration_ms", duration.as_millis() as u64);
+                    
+                    match result {
+                        Ok(()) => {
+                            tracing::Span::current().record("task.status", "success");
+                            info!(
+                                task.name = "search_view_refresh",
+                                duration_ms = duration.as_millis(),
+                                "Search view refresh task completed successfully"
+                            );
+                        }
+                        Err(ref e) => {
+                            tracing::Span::current().record("task.status", "error");
+                            error!(
+                                task.name = "search_view_refresh",
+                                duration_ms = duration.as_millis(),
+                                error = %e,
+                                "Search view refresh task failed"
+                            );
+                        }
+                    }
+                    result
+                }).await;
+                
+                if let Err(e) = result {
+                    error!(source = "scheduled_task", error = %e, "Search view refresh job failed");
                 }
             })
         })?
@@ -94,7 +211,15 @@ pub async fn start_scheduler_with_shutdown(
     // Start the scheduler
     scheduler.start().await?;
 
-    info!("Scheduled tasks scheduler started successfully");
+    let startup_duration = startup_start.elapsed();
+    tracing::Span::current().record("jobs.count", 5u64);
+    tracing::Span::current().record("startup_duration_ms", startup_duration.as_millis() as u64);
+
+    info!(
+        startup_duration_ms = startup_duration.as_millis(),
+        jobs_count = 5,
+        "Scheduled tasks scheduler started successfully"
+    );
 
     // Cooperative shutdown: wait for a shutdown signal, waking periodically
     loop {
@@ -225,6 +350,7 @@ async fn refresh_search_materialized_view(book_repository: Arc<BookRepositoryImp
 
     Ok(())
 }
+
 
 #[cfg(test)]
 mod tests {

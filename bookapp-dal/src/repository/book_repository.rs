@@ -263,8 +263,29 @@ impl BookRepository for BookRepositoryImpl {
         Ok(books)
     }
 
-    #[tracing::instrument(name = "get_book_by_id", skip(self), fields(book.id = %id))]
+    #[tracing::instrument(name = "get_book_by_id", skip(self), fields(book.id = %id, db.operation = "select", db.collection.name = "works"))]
     async fn find_by_id(&self, id: i32) -> Result<Option<Book>> {
+        let sql = r#"
+            SELECT
+                w.id                         as "id!",
+                w.id                         as "work_id!",
+                w.title                      as "work_title!",
+                a.id                         as "primary_author_id!",
+                a.name                       as "primary_author_name!",
+                'available'::book_status     as "status!: BookStatus"
+            FROM works w
+            JOIN work_authors wa
+              ON wa.work_id = w.id
+             AND wa.primary_author = true
+            JOIN authors a
+              ON a.id = wa.author_id
+            WHERE w.id = $1
+            "#;
+
+        // Record sanitized SQL statement in span
+        tracing::Span::current().record("db.statement", sql.trim());
+        tracing::Span::current().record("db.system", "postgresql");
+
         let book = sqlx::query_as!(
             Book,
             r#"

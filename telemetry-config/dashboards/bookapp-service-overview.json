@@ -455,7 +455,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(container_cpu_usage_nanoseconds_total{container_name=~\"rust-telemetry-example.*\"}[5m]) / 1000000000",
+          "expr": "rate(container_cpu_usage_nanoseconds_total{container_name=~\"$container_name\"}[5m]) / 1000000000",
           "legendFormat": "{{container_name}}",
           "range": true,
           "refId": "A"
@@ -556,7 +556,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "container_memory_percent_ratio{container_name=~\"rust-telemetry-example.*\"} * 100",
+          "expr": "container_memory_percent_ratio{container_name=~\"$container_name\"} * 100",
           "legendFormat": "{{container_name}}",
           "range": true,
           "refId": "A"
@@ -1967,7 +1967,7 @@
           ],
           "hide": false,
           "limit": 20,
-          "query": "{resource.service.name=\"bookapp\"}",
+          "query": "{resource.service.name=~\"$service\"}",
           "queryType": "traceql",
           "refId": "A",
           "tableType": "traces"
@@ -2031,7 +2031,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "{service_name=\"bookapp\"}",
+          "expr": "{service_name=~\"$service\"}",
           "queryType": "",
           "refId": "A"
         }
@@ -2775,7 +2775,62 @@
     "overview"
   ],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(traces_spanmetrics_calls_total, service)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "service",
+        "options": [],
+        "query": {
+          "query": "label_values(traces_spanmetrics_calls_total, service)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(container_cpu_usage_seconds_total, container_name)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "container_name",
+        "options": [],
+        "query": {
+          "query": "label_values(container_cpu_usage_seconds_total, container_name)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "regex": "rust-telemetry-example-.*",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
   },
   "time": {
     "from": "now-30m",

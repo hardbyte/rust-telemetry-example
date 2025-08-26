@@ -161,9 +161,10 @@ async fn main() -> Result<()> {
         let rx_for_sched = shutdown_rx.clone();
         let mut rx_for_wait = shutdown_rx.clone();
         let book_repository = book_repository.clone();
+        let search_refresher = search_refresher.clone();
         async move {
             tokio::select! {
-                res = scheduled_tasks::start_scheduler_with_shutdown(book_repository, rx_for_sched) => {
+                res = scheduled_tasks::start_scheduler_with_shutdown(book_repository, search_refresher, rx_for_sched) => {
                     if let Err(e) = res {
                         tracing::error!("Scheduler error: {:?}", e);
                     }

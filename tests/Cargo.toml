@@ -12,6 +12,16 @@ name = "telemetry_test"
 path = "src/telemetry_test.rs"
 harness = true
 
+[[test]]
+name = "alert_validation_test"
+path = "src/alert_validation_test.rs"
+harness = true
+
+[[test]]
+name = "alert_framework_test"
+path = "src/alert_framework_test.rs"
+harness = true
+
 [dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process"] }
 reqwest = { workspace = true, features = ["json"] }

@@ -9,7 +9,7 @@
       "rules": [
         {
           "uid": "be04wldshdiioe",
-          "title": "Error rate",
+          "title": "Error ratio",
           "condition": "C",
           "data": [
             {
@@ -26,7 +26,122 @@
                 },
                 "editorMode": "code",
                 "exemplar": false,
-                "expr": "sum(rate(traces_spanmetrics_calls_total{status_code=\"STATUS_CODE_ERROR\", service=\"bookapp\"}[$__rate_interval]))",
+                "expr": "sum(rate(traces_spanmetrics_calls_total{status_code=\"STATUS_CODE_ERROR\", service=\"bookapp\"}[5m]))",
+                "instant": false,
+                "interval": "",
+                "intervalMs": 60000,
+                "legendFormat": "__auto",
+                "maxDataPoints": 43200,
+                "range": true,
+                "refId": "A"
+              }
+            },
+            {
+              "refId": "B",
+              "relativeTimeRange": {
+                "from": 10800,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                },
+                "editorMode": "code",
+                "exemplar": false,
+                "expr": "sum(rate(traces_spanmetrics_calls_total{service=\"bookapp\"}[5m]))",
+                "instant": false,
+                "interval": "",
+                "intervalMs": 60000,
+                "legendFormat": "__auto",
+                "maxDataPoints": 43200,
+                "range": true,
+                "refId": "B"
+              }
+            },
+            {
+              "refId": "C",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "datasourceUid": "__expr__",
+              "model": {
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "params": [
+                        0.05
+                      ],
+                      "type": "gt"
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "C"
+                      ]
+                    },
+                    "reducer": {
+                      "params": [],
+                      "type": "last"
+                    },
+                    "type": "query"
+                  }
+                ],
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "$A / $B",
+                "intervalMs": 1000,
+                "maxDataPoints": 43200,
+                "refId": "C",
+                "type": "math"
+              }
+            }
+          ],
+          "dashboardUid": "ae04v0u4pbg8wb",
+          "panelId": 2,
+          "noDataState": "NoData",
+          "execErrState": "Error",
+          "for": "1m",
+          "annotations": {
+            "__dashboardUid__": "ae04v0u4pbg8wb",
+            "__panelId__": "2",
+            "description": "Error ratio for bookapp service has exceeded 5% for more than 1 minute",
+            "summary": "High error ratio detected on bookapp service"
+          },
+          "labels": {
+            "severity": "warning"
+          },
+          "isPaused": false,
+          "notification_settings": {
+            "receiver": "grafana-default-email"
+          }
+        },
+        {
+          "uid": "latency_p95_slo",
+          "title": "High Latency P95 SLO",
+          "condition": "B",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 300,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                },
+                "editorMode": "code",
+                "exemplar": false,
+                "expr": "histogram_quantile(0.95, sum(rate(traces_spanmetrics_latency_bucket{service=\"bookapp\", span_kind=\"SPAN_KIND_SERVER\"}[5m])) by (le))",
                 "instant": false,
                 "interval": "",
                 "intervalMs": 60000,
@@ -47,7 +162,9 @@
                 "conditions": [
                   {
                     "evaluator": {
-                      "params": [],
+                      "params": [
+                        0.5
+                      ],
                       "type": "gt"
                     },
                     "operator": {
@@ -76,60 +193,18 @@
                 "refId": "B",
                 "type": "reduce"
               }
-            },
-            {
-              "refId": "C",
-              "relativeTimeRange": {
-                "from": 0,
-                "to": 0
-              },
-              "datasourceUid": "__expr__",
-              "model": {
-                "conditions": [
-                  {
-                    "evaluator": {
-                      "params": [
-                        10
-                      ],
-                      "type": "gt"
-                    },
-                    "operator": {
-                      "type": "and"
-                    },
-                    "query": {
-                      "params": [
-                        "C"
-                      ]
-                    },
-                    "reducer": {
-                      "params": [],
-                      "type": "last"
-                    },
-                    "type": "query"
-                  }
-                ],
-                "datasource": {
-                  "type": "__expr__",
-                  "uid": "__expr__"
-                },
-                "expression": "B",
-                "intervalMs": 1000,
-                "maxDataPoints": 43200,
-                "refId": "C",
-                "type": "threshold"
-              }
             }
           ],
-          "dashboardUid": "ae04v0u4pbg8wb",
-          "panelId": 2,
           "noDataState": "NoData",
           "execErrState": "Error",
-          "for": "1m",
+          "for": "5m",
           "annotations": {
-            "__dashboardUid__": "ae04v0u4pbg8wb",
-            "__panelId__": "2"
+            "description": "P95 latency for bookapp service has exceeded 500ms SLO for more than 5 minutes",
+            "summary": "High latency detected on bookapp service"
           },
-          "labels": {},
+          "labels": {
+            "severity": "warning"
+          },
           "isPaused": false,
           "notification_settings": {
             "receiver": "grafana-default-email"
