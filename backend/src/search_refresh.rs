@@ -2,10 +2,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use anyhow::Result;
-use tracing::{error, info, instrument};
+use once_cell::sync::OnceCell;
 use opentelemetry::metrics::{Counter, Histogram, Meter, UpDownCounter};
 use opentelemetry::KeyValue;
-use once_cell::sync::OnceCell;
+use tracing::{error, info, instrument};
 
 use bookapp_dal::BookRepositoryImpl;
 
@@ -31,10 +31,17 @@ impl SmartSearchRefresher {
 
     pub fn notify_book_changed(&self) {
         self.pending_updates.fetch_add(1, Ordering::Relaxed);
-        metrics().pending.add(
-            1,
-            &[KeyValue::new("view.name", "book_search_view")],
-        );
+        metrics()
+            .pending
+            .add(1, &[KeyValue::new("view.name", "book_search_view")]);
+    }
+
+    /// Force a refresh for scheduled tasks (bypasses smart logic)
+    #[instrument(skip(self, book_repository))]
+    pub async fn force_refresh_for_schedule(&self, book_repository: Arc<BookRepositoryImpl>) -> Result<()> {
+        // For scheduled refresh, we bypass the smart logic and always refresh
+        self.execute_refresh(book_repository, "scheduled").await?;
+        Ok(())
     }
 
     #[instrument(
@@ -121,7 +128,10 @@ impl SmartSearchRefresher {
         RefreshDecision::Refresh
     }
 
-    #[instrument(skip(self, book_repository), fields(refresh_duration_ms, rows_affected))]
+    #[instrument(
+        skip(self, book_repository),
+        fields(refresh_duration_ms, rows_affected)
+    )]
     async fn execute_refresh(
         &self,
         book_repository: Arc<BookRepositoryImpl>,
@@ -141,10 +151,7 @@ impl SmartSearchRefresher {
 
         self.refresh_in_progress.store(false, Ordering::Relaxed);
 
-        tracing::Span::current().record(
-            "refresh_duration_ms",
-            refresh_duration.as_millis() as u64,
-        );
+        tracing::Span::current().record("refresh_duration_ms", refresh_duration.as_millis() as u64);
 
         match result {
             Ok(rows_affected) => {
@@ -166,18 +173,30 @@ impl SmartSearchRefresher {
                         KeyValue::new("view.name", "book_search_view"),
                     ],
                 );
-                metrics().duration.record(refresh_duration.as_secs_f64(), &[
-                    KeyValue::new("trigger", trigger),
-                    KeyValue::new("view.name", "book_search_view"),
-                ]);
+                metrics().duration.record(
+                    refresh_duration.as_secs_f64(),
+                    &[
+                        KeyValue::new("trigger", trigger),
+                        KeyValue::new("view.name", "book_search_view"),
+                    ],
+                );
                 // Adjust gauges using up/down counters
                 if prev_pending > 0 {
-                    metrics().pending.add(-(prev_pending as i64), &[KeyValue::new("view.name", "book_search_view")]);
+                    metrics().pending.add(
+                        -(prev_pending as i64),
+                        &[KeyValue::new("view.name", "book_search_view")],
+                    );
                 }
                 // Set last refresh timestamp by adding delta from previous
-                let delta = if prev_last == 0 { now_secs as i64 } else { now_secs as i64 - prev_last as i64 };
+                let delta = if prev_last == 0 {
+                    now_secs as i64
+                } else {
+                    now_secs as i64 - prev_last as i64
+                };
                 if delta != 0 {
-                    metrics().last_ts.add(delta, &[KeyValue::new("view.name", "book_search_view")]);
+                    metrics()
+                        .last_ts
+                        .add(delta, &[KeyValue::new("view.name", "book_search_view")]);
                 }
 
                 Ok(RefreshDecision::Refreshed {

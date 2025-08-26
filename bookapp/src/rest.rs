@@ -81,11 +81,12 @@ async fn get_book(
         .with_description("Retrieval of a book")
         .build();
 
-    // Add 1 for this book_id to the counter. Wouldn't actually want to have book_id as a dimension
-    counter.add(
-        1,
-        &[opentelemetry::KeyValue::new("book_id", id.to_string())],
-    );
+    // Add event to current span with book_id as attribute instead of high-cardinality metric dimension
+    let span = tracing::Span::current();
+    span.record("book_id", id);
+
+    // Increment counter with low-cardinality dimensions (e.g., operation type)
+    counter.add(1, &[opentelemetry::KeyValue::new("operation", "get_book")]);
 
     let repo = BookRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
     match repo.find_by_id(id).await {

@@ -710,4 +710,34 @@ Integration tests verify:
 - Error injection and telemetry generation
 - Cross-service trace correlation
 - Repository pattern functionality and database operations
+- **Alert validation framework**: End-to-end testing of Grafana alerts to ensure they fire correctly when conditions are met
+
+## Alert Validation Testing
+
+The project includes a comprehensive alert validation framework that tests the entire observability pipeline to ensure alerts work correctly in production.
+
+### Framework Features
+- **End-to-end validation**: Triggers alert conditions → Verifies alerts fire → Confirms resolution
+- **Threshold verification**: Validates actual metrics exceed expected thresholds via Prometheus
+- **Load injection strategies**: Error injection (404s) and latency injection (concurrent requests)  
+- **API integration**: Grafana alerts API, Prometheus via proxy, Progenitor client
+- **Real-time monitoring**: Configurable timeouts and alert state polling
+
+### Running Alert Tests
+
+```shell
+# Test framework connectivity and capabilities
+cargo test --package integration-tests --test alert_framework_test
+
+# Full end-to-end alert validation (when alerts aren't already firing)
+cargo test --package integration-tests --test alert_validation_test
+```
+
+### Validated Alerts
+- **Error Ratio Alert**: Monitors 5% error rate threshold with 1-minute duration
+- **P95 Latency Alert**: Monitors 500ms SLO threshold with 5-minute duration
+
+The framework provides **continuous confidence** that your observability alerts will fire correctly when real issues occur, validating the entire telemetry pipeline: App → OpenTelemetry → Prometheus → Grafana → Alerting.
+
+For detailed documentation, see [`docs/ALERT_VALIDATION_TESTING.md`](docs/ALERT_VALIDATION_TESTING.md).
 

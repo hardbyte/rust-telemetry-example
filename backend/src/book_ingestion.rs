@@ -147,8 +147,8 @@ async fn publish_event(producer: &FutureProducer, topic: &str, event: &Event) ->
         Err((e, _msg)) => Err(e.into()),
     }
 }
-use bookapp_dal::BookRepositoryImpl;
 use crate::search_refresh::{RefreshDecision, SmartSearchRefresher};
+use bookapp_dal::BookRepositoryImpl;
 use opentelemetry::global;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::trace::TraceContextExt;
@@ -207,10 +207,7 @@ async fn background_process_new_book(
         .await
     {
         Ok(decision) => {
-            tracing::Span::current().record(
-                "search_refresh.decision",
-                format!("{:?}", decision),
-            );
+            tracing::Span::current().record("search_refresh.decision", format!("{:?}", decision));
             match decision {
                 RefreshDecision::Refreshed {
                     duration,
