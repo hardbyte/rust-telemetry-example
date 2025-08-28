@@ -7,6 +7,7 @@ use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use std::sync::Arc;
+use tracing_subscriber::filter::FilterExt;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Layer;
 
@@ -17,6 +18,7 @@ pub struct ObservabilityConfig {
     pub enable_tokio_metrics: bool,
     pub tokio_metrics_interval: std::time::Duration,
     pub console_port: Option<u16>,
+    pub enable_per_task_tracking: bool,
 }
 
 impl ObservabilityConfig {
@@ -27,6 +29,7 @@ impl ObservabilityConfig {
             enable_tokio_metrics: true,
             tokio_metrics_interval: std::time::Duration::from_secs(5),
             console_port: None,
+            enable_per_task_tracking: true,
         }
     }
 
@@ -45,6 +48,12 @@ impl ObservabilityConfig {
     /// Set the console port for tokio-console
     pub fn with_console_port(mut self, port: u16) -> Self {
         self.console_port = Some(port);
+        self
+    }
+
+    /// Enable or disable per-task tracking with individual task metrics
+    pub fn with_per_task_tracking(mut self, enabled: bool) -> Self {
+        self.enable_per_task_tracking = enabled;
         self
     }
 }
@@ -109,6 +118,7 @@ pub fn init_tracing(
     SdkMeterProvider,
     SdkLoggerProvider,
     sentry::ClientInitGuard,
+    Option<crate::MetricRegistrations>,
 ) {
     let environment =
         std::env::var("SENTRY_ENVIRONMENT").unwrap_or_else(|_| "development".to_string());
@@ -204,11 +214,12 @@ pub fn init_tracing(
 
     opentelemetry::global::set_tracer_provider(tracer_provider.clone());
 
-    // Filter the tracing layer
+    // Filter the tracing layer - reduce tokio verbosity to avoid span conflicts
     let tracing_level_filter = tracing_subscriber::filter::Targets::new()
         .with_target("bookapp", tracing::Level::TRACE)
         .with_target("backend", tracing::Level::TRACE)
         .with_target("observability_utils", tracing::Level::TRACE)
+        .with_target("tokio::task", tracing::Level::TRACE) // Enable tokio task tracing for TaskTrackingLayer
         .with_target("sqlx", tracing::Level::DEBUG)
         .with_target("rdkafka", tracing::Level::INFO)
         .with_target("tower_http", tracing::Level::INFO)
@@ -217,10 +228,18 @@ pub fn init_tracing(
         .with_target("otel::tracing", tracing::Level::INFO)
         .with_default(tracing::Level::INFO);
 
+    // Custom filter for OpenTelemetry layer that excludes runtime.spawn spans
+    let otel_tracing_filter = tracing_level_filter.and(
+        tracing_subscriber::filter::FilterFn::new(|metadata| {
+            // Allow all spans except tokio's runtime.spawn spans (which are handled by TaskTrackingLayer)
+            !(metadata.target() == "tokio::task" && metadata.name() == "runtime.spawn")
+        })
+    );
+
     // Turn our OTLP pipeline into a tracing layer
     let tracing_opentelemetry_layer = tracing_opentelemetry::layer()
         .with_tracer(tracer_provider.tracer(config.service_name.clone()))
-        .with_filter(tracing_level_filter);
+        .with_filter(otel_tracing_filter);
 
     // Configure the stdout fmt layer
     let format = tracing_subscriber::fmt::format()
@@ -264,15 +283,68 @@ pub fn init_tracing(
         .with(opentelemetry_metrics_layer)
         .with(stdout_layer.with_filter(tracing_subscriber::EnvFilter::from_default_env()));
 
-    tracing::subscriber::set_global_default(subscriber).expect("Failed to set subscriber");
+    // Add automatic task tracking layer if available
+    #[cfg(feature = "tracing-layer")]
+    let (subscriber, task_tracking_registrations) = {
+        use tokio_otel_metrics::task::{PerTaskTrackingConfig, TaskTrackingLayer};
 
-    (tracer_provider, meter_provider, log_provider, sentry_guard)
+        // Configure aggressive task tracking to capture all task activity
+        let task_tracking_config = PerTaskTrackingConfig {
+            enabled: true,
+            max_tracked_tasks: 1024,
+            min_stack_threshold: 1,
+            min_lifetime_threshold: std::time::Duration::from_millis(1),
+        };
+
+        let task_tracking_layer = TaskTrackingLayer::with_config(task_tracking_config);
+        tracing::info!("Adding automatic task tracking layer with aggressive thresholds");
+
+        // Debug layer removed to avoid span extension conflicts
+
+        // Register the task tracking layer's metrics with OpenTelemetry
+        let task_meter = meter_provider.meter("tokio_automatic_task_tracking");
+        let registrations = task_tracking_layer
+            .metrics()
+            .register_metrics(&task_meter)
+            .expect("Failed to register automatic task tracking metrics");
+        tracing::info!(
+            "Registered {} automatic task tracking metric callbacks",
+            registrations.len()
+        );
+
+        (subscriber.with(task_tracking_layer), Some(registrations))
+    };
+
+    #[cfg(not(feature = "tracing-layer"))]
+    let task_tracking_registrations: Option<crate::MetricRegistrations> = None;
+
+    // Add console subscriber if console port is configured
+    if let Some(console_port) = config.console_port {
+        tracing::info!("Initializing tokio-console on port {}", console_port);
+        let console_layer = console_subscriber::ConsoleLayer::builder()
+            .server_addr(([0, 0, 0, 0], console_port))
+            .spawn();
+
+        let final_subscriber = subscriber.with(console_layer);
+        tracing::subscriber::set_global_default(final_subscriber)
+            .expect("Failed to set subscriber");
+    } else {
+        tracing::subscriber::set_global_default(subscriber).expect("Failed to set subscriber");
+    }
+
+    (
+        tracer_provider,
+        meter_provider,
+        log_provider,
+        sentry_guard,
+        task_tracking_registrations,
+    )
 }
 
 /// Initialize tokio runtime metrics collection using our enhanced implementation
 pub fn init_tokio_runtime_metrics(
     meter_provider: &SdkMeterProvider,
-) -> Result<Vec<crate::ObservableRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<crate::MetricRegistrations, Box<dyn std::error::Error + Send + Sync>> {
     use crate::TokioRuntimeMetrics;
 
     let meter = meter_provider.meter("tokio_runtime");
@@ -291,7 +363,7 @@ pub fn init_tokio_runtime_metrics(
 pub fn start_tokio_metrics(
     config: &ObservabilityConfig,
     meter_provider: &SdkMeterProvider,
-) -> Result<Vec<crate::ObservableRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<crate::MetricRegistrations, Box<dyn std::error::Error + Send + Sync>> {
     tracing::info!(
         "start_tokio_metrics called with enable_tokio_metrics={}",
         config.enable_tokio_metrics
@@ -299,7 +371,7 @@ pub fn start_tokio_metrics(
 
     if !config.enable_tokio_metrics {
         tracing::info!("Tokio metrics collection disabled by configuration");
-        return Ok(Vec::new());
+        return Ok(crate::MetricRegistrations::new(Vec::new()));
     }
 
     // Create a simple test counter to verify OpenTelemetry metrics are working
@@ -319,7 +391,7 @@ pub fn start_tokio_metrics(
 pub fn start_task_metrics(
     _config: &ObservabilityConfig,
     meter_provider: &SdkMeterProvider,
-) -> Result<Vec<crate::ObservableRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<crate::MetricRegistrations, Box<dyn std::error::Error + Send + Sync>> {
     use crate::TaskMetrics;
 
     let meter = meter_provider.meter("tokio_tasks");
@@ -330,5 +402,40 @@ pub fn start_task_metrics(
         "Task-level metrics registered successfully ({} callbacks)",
         registrations.len()
     );
+    Ok(registrations)
+}
+
+/// Start per-task tracking metrics collection
+pub async fn start_per_task_tracking(
+    config: &ObservabilityConfig,
+    meter_provider: &SdkMeterProvider,
+) -> Result<crate::MetricRegistrations, Box<dyn std::error::Error + Send + Sync>> {
+    use std::time::Duration;
+    use tokio_otel_metrics::{PerTaskTrackingConfig, TaskMetrics};
+
+    if !config.enable_per_task_tracking {
+        tracing::info!("Per-task tracking disabled by configuration");
+        return Ok(crate::MetricRegistrations::new(Vec::new()));
+    }
+
+    let meter = meter_provider.meter("tokio_per_task_tracking");
+
+    // Configure per-task tracking with absolute minimum thresholds to capture any task activity
+    let per_task_config = PerTaskTrackingConfig {
+        enabled: true,
+        max_tracked_tasks: 1024, // Track up to 1024 individual tasks (maximum capture)
+        min_stack_threshold: 1,  // Track tasks >1B stack (capture virtually everything)
+        min_lifetime_threshold: Duration::from_millis(1), // Track tasks >1ms lifetime (capture everything)
+    };
+
+    // Create a static task metrics instance with per-task tracking configuration
+    let task_metrics = Box::leak(Box::new(TaskMetrics::with_config(per_task_config)));
+    let registrations = task_metrics.register_metrics(&meter)?;
+
+    tracing::info!(
+        "Per-task tracking metrics registered successfully ({} callbacks, max_tasks: 1024, min_stack: 1B, min_lifetime: 1ms)",
+        registrations.len()
+    );
+
     Ok(registrations)
 }

@@ -10,7 +10,7 @@ default = []
 [dependencies]
 bookapp-dal = { path = "../bookapp-dal" }
 client = { path = "../client" }
-observability-utils = { path = "../observability-utils" }
+observability-utils = { path = "../observability-utils", features = ["worker-metrics", "tracing-layer"] }
 tower-otel-http-metrics = { version = "0.16.0", features = ["axum"] }
 
 anyhow = "1.0.98"

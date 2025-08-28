@@ -67,7 +67,7 @@
       },
       "targets": [
         {
-          "expr": "tokio_runtime_workers_count",
+          "expr": "tokio_runtime_workers_ratio",
           "refId": "A"
         }
       ],
@@ -107,7 +107,7 @@
       },
       "targets": [
         {
-          "expr": "tokio_alive_tasks",
+          "expr": "tokio_runtime_tasks_active",
           "refId": "A"
         }
       ],
@@ -147,7 +147,7 @@
       },
       "targets": [
         {
-          "expr": "tokio_task_active_count",
+          "expr": "tokio_runtime_tasks_active",
           "refId": "A"
         }
       ],
@@ -187,7 +187,7 @@
       },
       "targets": [
         {
-          "expr": "tokio_global_queue_depth",
+          "expr": "tokio_runtime_queue_depth_ratio",
           "refId": "A"
         }
       ],
@@ -240,7 +240,7 @@
       },
       "targets": [
         {
-          "expr": "rate(tokio_spawned_tasks_total[5m])",
+          "expr": "rate(tokio_runtime_tasks_spawned_total[5m])",
           "legendFormat": "{{service_name}} - Spawned",
           "refId": "A"
         },
@@ -286,12 +286,12 @@
       },
       "targets": [
         {
-          "expr": "tokio_alive_tasks",
+          "expr": "tokio_runtime_tasks_active",
           "legendFormat": "{{service_name}} - Alive",
           "refId": "A"
         },
         {
-          "expr": "tokio_task_active_count",
+          "expr": "tokio_runtime_tasks_active",
           "legendFormat": "{{service_name}} - Active",
           "refId": "B"
         }
@@ -432,7 +432,7 @@
           "refId": "A"
         },
         {
-          "expr": "tokio_global_queue_depth",
+          "expr": "tokio_runtime_queue_depth_ratio",
           "legendFormat": "{{service_name}} - Global Queue",
           "refId": "B"
         }
@@ -491,7 +491,7 @@
           "refId": "A"
         },
         {
-          "expr": "tokio_runtime_workers_count",
+          "expr": "tokio_runtime_workers_ratio",
           "legendFormat": "{{service_name}} - Worker Threads",
           "refId": "B"
         }
@@ -539,6 +539,332 @@
       ],
       "title": "Remote Schedule Rate",
       "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "id": 200,
+      "panels": [],
+      "title": "🔍 Enhanced Task-Level Metrics",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Task performance issues that require attention - large stack usage and slow startup times",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {"mode": "none"},
+            "thresholdsStyle": {"mode": "off"}
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byRegexp", "options": "Large Stack.*"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 33
+      },
+      "id": 201,
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom"},
+        "tooltip": {"mode": "single", "sort": "none"}
+      },
+      "targets": [
+        {
+          "expr": "tokio_runtime_tasks_large_stack_total",
+          "legendFormat": "Large Stack Tasks (>1KB) - {{service_name}}",
+          "refId": "A"
+        },
+        {
+          "expr": "tokio_runtime_tasks_slow_start_total", 
+          "legendFormat": "Slow Start Tasks (>100ms) - {{service_name}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Task Performance Issues",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 1024},
+              {"color": "red", "value": 2000}
+            ]
+          },
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 33
+      },
+      "id": 202,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "tokio_runtime_tasks_stack_bytes_max",
+          "legendFormat": "{{service_name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Max Stack Size",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 10000},
+              {"color": "red", "value": 50000}
+            ]
+          },
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 33
+      },
+      "id": 203,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto", 
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "tokio_runtime_tasks_stack_bytes_total",
+          "legendFormat": "{{service_name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Total Active Stack",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {"mode": "none"},
+            "thresholdsStyle": {"mode": "off"}
+          },
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 37
+      },
+      "id": 204,
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom"},
+        "tooltip": {"mode": "single", "sort": "none"}
+      },
+      "targets": [
+        {
+          "expr": "tokio_runtime_tasks_stack_bytes_total",
+          "legendFormat": "Total Stack - {{service_name}}",
+          "refId": "A"
+        },
+        {
+          "expr": "tokio_runtime_tasks_stack_bytes_max",
+          "legendFormat": "Max Stack - {{service_name}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Stack Usage Trends",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Individual task details for tasks with high stack usage (>1KB) or long lifetime (>10s)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "custom": {
+            "align": "auto",
+            "displayMode": "auto",
+            "inspect": false,
+            "width": null
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 1024},
+              {"color": "red", "value": 2048}
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "Stack (bytes)"},
+            "properties": [
+              {"id": "unit", "value": "bytes"},
+              {"id": "custom.width", "value": 120}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "Lifetime (s)"},
+            "properties": [
+              {"id": "unit", "value": "s"},
+              {"id": "custom.width", "value": 100}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "Task Name"},
+            "properties": [
+              {"id": "custom.width", "value": 200}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "Location"},
+            "properties": [
+              {"id": "custom.width", "value": 300}
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
+      "id": 205,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": ["sum"],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Stack (bytes)"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "tokio_task_count_by_name",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "__auto",
+          "refId": "A"
+        },
+        {
+          "expr": "tokio_task_lifetime_by_name_seconds",
+          "format": "table", 
+          "instant": true,
+          "legendFormat": "__auto",
+          "refId": "B"
+        }
+      ],
+      "title": "Task Details by Name (Low Cardinality)",
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "__name__": true,
+              "Time": true,
+              "job": true,
+              "instance": true
+            },
+            "indexByName": {
+              "task_name": 0,
+              "Value #A": 1,
+              "Value #B": 2
+            },
+            "renameByName": {
+              "Value #A": "Task Count",
+              "Value #B": "Avg Lifetime (s)",
+              "task_name": "Task Name"
+            }
+          }
+        }
+      ],
+      "type": "table"
     }
   ],
   "refresh": "30s",

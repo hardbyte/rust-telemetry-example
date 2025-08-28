@@ -1,7 +1,6 @@
 services:
 
   app:
-    profiles: [default, ci]
     build: .
     environment:
       DATABASE_URL: "postgres://postgres:password@db:5432/bookapp"
@@ -10,7 +9,7 @@ services:
       TRACE_SAMPLE_PROBABILITY: 1.0
       KAFKA_BROKER_URL: "kafka:9092"
       ENABLE_KAFKA_PRODUCER: "true"
-      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_ENVIRONMENT: "development"
       SENTRY_RELEASE: "bookapp@1.0.0"
     ports:
@@ -23,7 +22,6 @@ services:
         condition: service_healthy
 
   backend:
-    profiles: [default, ci]
     build:
       context: .
       dockerfile: Dockerfile.backend
@@ -36,11 +34,11 @@ services:
       KAFKA_GROUP_ID: "backend_consumer_group"
       SEARCH_REFRESH_MIN_INTERVAL_SECS: ${SEARCH_REFRESH_MIN_INTERVAL_SECS:-30}
       SEARCH_REFRESH_MAX_STALENESS_SECS: ${SEARCH_REFRESH_MAX_STALENESS_SECS:-300}
-      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_ENVIRONMENT: "development"
       SENTRY_RELEASE: "backend@1.0.0"
-    ports:
-      - "6670:6670"  # Console subscriber port for backend
+    #ports:
+    #  - "6670:6670"  # Console subscriber port for backend
     depends_on:
       app:
         condition: service_started
@@ -51,7 +49,6 @@ services:
 
 
   db:
-    profiles: [ci, default]
     image: postgres:17
     environment:
       POSTGRES_USER: postgres
@@ -66,7 +63,6 @@ services:
       retries: 5
 
   kafka:
-    profiles: [ci, default]
     image: bitnami/kafka:latest
     environment:
       # KRaft mode configuration (no ZooKeeper needed)
@@ -90,7 +86,6 @@ services:
 
 
   telemetry:
-    profiles: [default, ci]
     image: grafana/otel-lgtm:0.11.8
     depends_on:
       db:
@@ -121,7 +116,6 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 
   integration-tester:
-    profiles: [default, ci]
     build:
       context: .
       target: builder # Use the builder stage from the Dockerfile

@@ -14,7 +14,9 @@ behavior, and resource utilization through OpenTelemetry's efficient callback-ba
 - 🚀 **Low-overhead collection** using OpenTelemetry observable instruments
 - 📊 **Comprehensive metrics** covering runtime, workers, and tasks
 - 🔧 **OpenTelemetry 0.30+ compatible** for modern observability stacks
-- 💾 **Optional memory metrics** via `memory-stats` crate
+- 💾 **Optional memory metrics** via `memory-metrics` feature
+- 👷 **Optional per-worker metrics** via `worker-metrics` feature
+- 🏗️ **RAII resource management** with automatic metric cleanup
 
 ## Quick Start
 
@@ -50,26 +52,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Available Metrics
 
-### Runtime-Level Metrics
+### Runtime-Level Metrics (Always Available)
 
-| Metric Name | Type | Description |
-|-------------|------|-------------|
-| `tokio_workers_count` | Gauge | Number of worker threads in the runtime |
-| `tokio_alive_tasks` | Gauge | Number of currently alive tasks |
-| `tokio_global_queue_depth` | Gauge | Depth of the global task queue |
-| `tokio_blocking_threads` | Gauge | Number of blocking threads |
-| `tokio_spawned_tasks_total` | Gauge | Total tasks spawned since runtime creation* |
-| `tokio_blocking_queue_depth` | Gauge | Depth of the blocking task queue* |
+| Metric Name | Type | Unit | Description |
+|-------------|------|------|-------------|
+| `tokio.runtime.workers` | Gauge | `1` | Number of worker threads in the runtime |
+| `tokio.runtime.tasks.active` | Gauge | `1` | Number of currently active tasks |
+| `tokio.runtime.queue.depth` | Gauge | `1` | Depth of the global task queue |
+| `tokio.runtime.threads.blocking` | Gauge | `1` | Number of blocking threads |
+| `tokio.runtime.tasks.spawned` | Counter | `1` | Total tasks spawned since runtime creation* |
+| `tokio.runtime.blocking.queue.depth` | Gauge | `1` | Depth of the blocking task queue* |
 
-### Per-Worker Metrics
+*Requires `target_has_atomic="64"` on the target platform.
 
-| Metric Name | Type | Description | Labels |
-|-------------|------|-------------|--------|
-| `tokio_worker_busy_duration_seconds` | Gauge | Time each worker has been busy | `worker_id` |
-| `tokio_worker_park_count` | Gauge | Times each worker has parked | `worker_id` |
-| `tokio_worker_poll_count` | Gauge | Tasks polled by each worker | `worker_id` |
+### Per-Worker Metrics (`worker-metrics` feature)
 
-### Memory Metrics (Optional)
+Enable with the `worker-metrics` feature:
+
+```toml
+tokio-otel-metrics = { version = "0.1.0", features = ["worker-metrics"] }
+```
+
+| Metric Name | Type | Unit | Description | Labels |
+|-------------|------|------|-------------|--------|
+| `tokio.runtime.worker.busy_time` | Counter | `s` | Total time each worker has been busy | `worker.id` |
+| `tokio.runtime.worker.parks` | Counter | `1` | Number of times each worker has parked | `worker.id` |
+| `tokio.runtime.worker.polls` | Counter | `1` | Number of tasks polled by each worker | `worker.id` |
+| `tokio.runtime.worker.steals` | Counter | `1` | Number of tasks stolen by each worker | `worker.id` |
+| `tokio.runtime.worker.overflows` | Counter | `1` | Number of overflow events by each worker | `worker.id` |
+| `tokio.runtime.worker.queue.depth` | Gauge | `1` | Local queue depth for each worker | `worker.id` |
+
+### Task-Level Metrics
+
+| Metric Name | Type | Unit | Description |
+|-------------|------|------|-------------|
+| `tokio.tasks.completed` | Counter | `1` | Number of manually tracked completed tasks |
+| `tokio.runtime.tasks.slow_start` | Counter | `1` | Tasks with >100ms spawn-to-poll delay |
+| `tokio.runtime.polls.total` | Counter | `1` | Total number of task polls across all tasks |
+| `tokio.runtime.poll.duration.total` | Counter | `s` | Total time spent in task polls |
+| `tokio.runtime.poll.duration` | Histogram | `s` | Distribution of individual task poll durations |
+
+### Memory Metrics (`memory-metrics` feature)
 
 Enable with the `memory-metrics` feature:
 
@@ -77,11 +100,9 @@ Enable with the `memory-metrics` feature:
 tokio-otel-metrics = { version = "0.1.0", features = ["memory-metrics"] }
 ```
 
-| Metric Name | Type | Description |
-|-------------|------|-------------|
-| `process_memory_usage_bytes` | Gauge | Process memory usage (RSS) |
-
-*\* Requires `target_has_atomic="64"` on the target platform*
+| Metric Name | Type | Unit | Description | Labels |
+|-------------|------|------|-------------|--------|
+| `process.memory.usage` | Gauge | `By` | Process memory usage | `state="rss"` |
 
 ## Advanced Usage
 
@@ -93,6 +114,23 @@ use tokio_otel_metrics::register_all_metrics;
 let _registrations = register_all_metrics(&meter)?;
 ```
 
+### Task-Level Metrics
+
+For detailed task tracking, use the `TaskMetrics` collector:
+
+```rust
+use tokio_otel_metrics::TaskMetrics;
+
+let task_metrics = TaskMetrics::new();
+let _registrations = task_metrics.register_metrics(&meter)?;
+
+// Track individual tasks
+let task_id = tokio::spawn(async { /* work */ }).id();
+task_metrics.task_spawned(task_id, "my_task");
+task_metrics.task_polled(task_id, Duration::from_millis(5));
+task_metrics.task_completed(task_id);
+```
+
 ### Memory Metrics
 
 ```rust
@@ -100,7 +138,7 @@ let _registrations = register_all_metrics(&meter)?;
 use tokio_otel_metrics::ProcessMemoryMetrics;
 
 #[cfg(feature = "memory-metrics")]
-let _memory_registration = ProcessMemoryMetrics::register(&meter)?;
+let _memory_registrations = ProcessMemoryMetrics::register(&meter)?;
 ```
 
 ### Using with OpenTelemetry Exporters
@@ -137,23 +175,13 @@ Memory metrics are provided by the [`memory-stats`](https://crates.io/crates/mem
 
 ## Comparison with Other Crates
 
-| Feature | tokio-otel-metrics | runtime-otel-rs |
-|---------|-------------------|-----------------|
-| OpenTelemetry 0.30+ | ✅ | ❌ |
-| Zero-overhead collection | ✅ | ✅ |
-| Worker-specific metrics | ✅ | ✅ |
-| Memory metrics | ✅ (optional) | ✅ |
-| Production ready | ✅ | Experimental |
-| Comprehensive documentation | ✅ | Limited |
+| Feature                     | tokio-otel-metrics | runtime-otel-rs |
+|-----------------------------|-------------------|-----------------|
+| OpenTelemetry 0.30+         | ✅ | ❌ |
+| Low-overhead collection     | ✅ | ✅ |
+| Worker-specific metrics     | ✅ | ✅ |
+| Memory metrics              | ✅ (optional) | ✅ |
 
-## Examples
-
-See the [`examples/`](examples/) directory for complete working examples:
-
-- [`basic.rs`](examples/basic.rs) - Simple runtime metrics collection
-- [`with_memory.rs`](examples/with_memory.rs) - Runtime + memory metrics
-- [`prometheus_export.rs`](examples/prometheus_export.rs) - Export to Prometheus
-- [`otlp_export.rs`](examples/otlp_export.rs) - Export via OTLP
 
 ## Testing
 
@@ -166,15 +194,18 @@ cargo test
 # Tests with memory metrics
 cargo test --features memory-metrics
 
+# Tests with worker metrics
+cargo test --features worker-metrics
+
+# Tests with all features
+cargo test --all-features
+
 # Tests with unstable features
-RUSTFLAGS="--cfg tokio_unstable" cargo test --features memory-metrics
+RUSTFLAGS="--cfg tokio_unstable" cargo test --all-features
 ```
 
-## Contributing
 
-Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details.
-
-### Development Setup
+## Development Setup
 
 ```bash
 cd tokio-otel-metrics
@@ -184,7 +215,7 @@ cargo test
 
 ## License
 
-Licensed under the Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0).
+Licensed under the Apache License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.
 
 ### Contribution
 

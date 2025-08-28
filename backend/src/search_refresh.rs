@@ -38,7 +38,10 @@ impl SmartSearchRefresher {
 
     /// Force a refresh for scheduled tasks (bypasses smart logic)
     #[instrument(skip(self, book_repository))]
-    pub async fn force_refresh_for_schedule(&self, book_repository: Arc<BookRepositoryImpl>) -> Result<()> {
+    pub async fn force_refresh_for_schedule(
+        &self,
+        book_repository: Arc<BookRepositoryImpl>,
+    ) -> Result<()> {
         // For scheduled refresh, we bypass the smart logic and always refresh
         self.execute_refresh(book_repository, "scheduled").await?;
         Ok(())

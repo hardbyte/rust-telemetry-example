@@ -3,6 +3,7 @@ ARG RUST_VERSION=1.84
 FROM rust:${RUST_VERSION}-bookworm AS builder
 WORKDIR /usr/src/bookapp
 ENV SQLX_OFFLINE=true
+ENV RUSTFLAGS="--cfg tokio_unstable"
 
 # Copy the full source and build the app in release mode
 COPY . .

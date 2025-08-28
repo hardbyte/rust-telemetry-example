@@ -18,7 +18,7 @@ use anyhow::Result;
 use axum::{Extension, Json, Router};
 use axum_tracing_opentelemetry::middleware::{OtelAxumLayer, OtelInResponseLayer};
 use opentelemetry::metrics::MeterProvider;
-use rdkafka::producer::FutureProducer;
+use rdkafka::{config::FromClientConfig, producer::FutureProducer};
 use sentry_tower::NewSentryLayer;
 use serde_json::{json, Value};
 use tokio::signal::unix::{signal, SignalKind};
@@ -96,8 +96,8 @@ async fn main() -> Result<()> {
         std::env::var("ENABLE_KAFKA_PRODUCER").unwrap_or_else(|_| "false".to_string()) == "true";
 
     let observability_config =
-        observability_utils::ObservabilityConfig::new("bookapp").with_console_port(6669);
-    let (trace_provider, meter_provider, log_provider, sentry_guard) =
+        observability_utils::ObservabilityConfig::new("bookapp").with_per_task_tracking(true);
+    let (trace_provider, meter_provider, log_provider, sentry_guard, _task_tracking_registrations) =
         observability_utils::init_tracing(observability_config.clone());
 
     info!("Tracing initialized successfully");
@@ -123,6 +123,18 @@ async fn main() -> Result<()> {
         );
     } else {
         info!("Failed to initialize task metrics");
+    }
+
+    // Initialize per-task tracking metrics
+    if let Ok(per_task_registrations) =
+        observability_utils::start_per_task_tracking(&observability_config, &meter_provider).await
+    {
+        info!(
+            "Successfully initialized {} per-task tracking metric registrations",
+            per_task_registrations.len()
+        );
+    } else {
+        info!("Failed to initialize per-task tracking");
     }
 
     // Init db
@@ -153,13 +165,12 @@ async fn main() -> Result<()> {
         info!("Successfully force-flushed metrics");
     }
 
-    // Create Kafka admin client
-    let admin_client = topic_management::create_admin_client()?;
-
-    // Ensure the topic exists
-    topic_management::ensure_topic_exists(&admin_client, "book_ingestion").await?;
-
     if enable_kafka_producer {
+        // Create Kafka admin client
+        let admin_client = topic_management::create_admin_client()?;
+
+        // Ensure the topic exists
+        topic_management::ensure_topic_exists(&admin_client, "book_ingestion").await?;
         info!("Setting up Kafka Producer");
 
         // Initialize Kafka producer
@@ -172,6 +183,33 @@ async fn main() -> Result<()> {
         let listener = tokio::net::TcpListener::bind("0.0.0.0:8000").await?;
 
         info!("Starting webserver");
+        let server = axum::serve(listener, app).with_graceful_shutdown(async {
+            let mut signal_terminate = signal(SignalKind::terminate()).unwrap();
+            let mut signal_interrupt = signal(SignalKind::interrupt()).unwrap();
+
+            tokio::select! {
+                _ = signal_terminate.recv() => tracing::debug!("Received SIGTERM."),
+                _ = signal_interrupt.recv() => tracing::debug!("Received SIGINT."),
+            }
+        });
+
+        tokio::select! {
+            _ = server => tracing::info!("Server has shut down gracefully."),
+            else => tracing::error!("Server encountered an error."),
+        }
+    } else {
+        info!("Running without Kafka producer - creating minimal server");
+
+        // Build the application router without producer
+        let producer: FutureProducer =
+            rdkafka::producer::FutureProducer::from_config(&rdkafka::ClientConfig::new())
+                .expect("Failed to create minimal producer");
+        let app = router(db_pools, producer);
+
+        // Start the server
+        let listener = tokio::net::TcpListener::bind("0.0.0.0:8000").await?;
+        info!("Starting webserver without Kafka");
+
         let server = axum::serve(listener, app).with_graceful_shutdown(async {
             let mut signal_terminate = signal(SignalKind::terminate()).unwrap();
             let mut signal_interrupt = signal(SignalKind::interrupt()).unwrap();

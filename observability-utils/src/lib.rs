@@ -10,9 +10,11 @@ pub mod tracing_config;
 pub use sentry_correlation::SentryOtelCorrelationLayer;
 // pub use simple_tokio_metrics::{SimpleTokioMetrics, SimpleMemoryMetrics}; // Disabled
 pub use tracing_config::{
-    init_tokio_runtime_metrics, init_tracing, start_task_metrics, start_tokio_metrics,
-    ObservabilityConfig,
+    init_tokio_runtime_metrics, init_tracing, start_per_task_tracking, start_task_metrics,
+    start_tokio_metrics, ObservabilityConfig,
 };
 
 // Re-export the enhanced tokio-otel-metrics crate
-pub use tokio_otel_metrics::{ObservableRegistration, TaskMetrics, TokioRuntimeMetrics};
+pub use tokio_otel_metrics::{
+    MetricRegistrations, ObservableHandle, TaskMetrics, TokioRuntimeMetrics,
+};

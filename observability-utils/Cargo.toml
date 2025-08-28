@@ -6,6 +6,7 @@ description = "Shared observability utilities for tracing, metrics, and error tr
 
 [dependencies]
 anyhow = "1.0.98"
+console-subscriber = "0.4.1"
 opentelemetry = { workspace = true }
 opentelemetry-appender-tracing = { version = "0.30.1", features = ["experimental_use_tracing_span_context"] }
 opentelemetry-otlp = { version = "0.30.0", features = [
@@ -26,5 +27,7 @@ tracing-opentelemetry = { workspace = true, features = ["async-trait"] }
 tracing-subscriber = { version = "0.3.19", features = ["fmt", "env-filter", "json", "tracing-log"] }
 
 [features]
-default = []
+default = ["tracing-layer"]
 memory-metrics = ["procfs", "page_size"]
+worker-metrics = ["tokio-otel-metrics/worker-metrics"]
+tracing-layer = ["tokio-otel-metrics/tracing-layer"]

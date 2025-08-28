@@ -263,7 +263,7 @@ impl BookRepository for BookRepositoryImpl {
         Ok(books)
     }
 
-    #[tracing::instrument(name = "get_book_by_id", skip(self), fields(book.id = %id, db.operation = "select", db.collection.name = "works"))]
+    #[tracing::instrument(name = "get_book_by_id", skip(self), fields(book.id = %id, db.operation.name = "select", db.collection.name = "works", db.namespace = "bookapp", db.system.name = "postgresql"))]
     async fn find_by_id(&self, id: i32) -> Result<Option<Book>> {
         let sql = r#"
             SELECT
@@ -283,8 +283,7 @@ impl BookRepository for BookRepositoryImpl {
             "#;
 
         // Record sanitized SQL statement in span
-        tracing::Span::current().record("db.statement", sql.trim());
-        tracing::Span::current().record("db.system", "postgresql");
+        tracing::Span::current().record("db.query.text", sql.trim());
 
         let book = sqlx::query_as!(
             Book,
@@ -312,7 +311,7 @@ impl BookRepository for BookRepositoryImpl {
         Ok(book)
     }
 
-    #[tracing::instrument(name = "create_work_with_primary_author", skip(self, input), fields(work.title = %input.work_title))]
+    #[tracing::instrument(name = "create_work_with_primary_author", skip(self, input), fields(work.title = %input.work_title, db.operation.name = "insert", db.collection.name = "works", db.namespace = "bookapp", db.system.name = "postgresql"))]
     async fn create(&self, input: BookCreateInput) -> Result<i32> {
         // 1) Insert the work
         let work_id: i32 = sqlx::query_scalar(
@@ -366,7 +365,7 @@ impl BookRepository for BookRepositoryImpl {
         Ok(work_id)
     }
 
-    #[tracing::instrument(name = "update_book_in_db", skip(self), fields(book.id = %book.id, book.work_title = %book.work_title))]
+    #[tracing::instrument(name = "update_book_in_db", skip(self), fields(book.id = %book.id, book.work_title = %book.work_title, db.operation.name = "update", db.collection.name = "works", db.namespace = "bookapp", db.system.name = "postgresql"))]
     async fn update(&self, book: Book) -> Result<i32> {
         let result = sqlx::query(
             r#"
@@ -382,7 +381,7 @@ impl BookRepository for BookRepositoryImpl {
         .await?;
 
         let rows_affected: i32 = result.rows_affected().try_into().unwrap_or(0);
-        tracing::Span::current().record("db.rows_affected", rows_affected);
+        tracing::Span::current().record("db.response.returned_rows", rows_affected as u64);
 
         if rows_affected == 0 {
             warn!("Update operation affected 0 rows - book may not exist");
@@ -393,7 +392,7 @@ impl BookRepository for BookRepositoryImpl {
         Ok(rows_affected)
     }
 
-    #[tracing::instrument(name = "delete_book_from_db", skip(self), fields(book.id = %id))]
+    #[tracing::instrument(name = "delete_book_from_db", skip(self), fields(book.id = %id, db.operation.name = "delete", db.collection.name = "works", db.namespace = "bookapp", db.system.name = "postgresql"))]
     async fn delete(&self, id: i32) -> Result<()> {
         let result = sqlx::query!("DELETE FROM works WHERE id = $1", id)
             .execute(self.write_pool.as_ref())
@@ -406,7 +405,7 @@ impl BookRepository for BookRepositoryImpl {
         Ok(())
     }
 
-    #[tracing::instrument(name = "bulk_create_books_in_db", skip(self, books), fields(num_books = books.len()))]
+    #[tracing::instrument(name = "bulk_create_books_in_db", skip(self, books), fields(num_books = books.len(), db.operation.name = "batch_insert", db.collection.name = "works", db.namespace = "bookapp", db.system.name = "postgresql", db.operation.batch.size = books.len()))]
     async fn bulk_create(&self, books: &[BookCreateInput]) -> Result<Vec<i32>> {
         if books.is_empty() {
             return Ok(Vec::new());
@@ -476,7 +475,6 @@ impl BookRepository for BookRepositoryImpl {
     }
 
     async fn search_books(&self, params: BookSearchParams) -> Result<Vec<Book>> {
-        // Simplified search for now - can be enhanced later with conditional queries
         let offset = (params.page - 1) * params.per_page;
 
         if let Some(search_term) = params.search_term {

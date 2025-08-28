@@ -2121,6 +2121,7 @@ name = "observability-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "console-subscriber",
  "opentelemetry 0.30.0",
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
@@ -3972,9 +3973,11 @@ dependencies = [
  "once_cell",
  "opentelemetry 0.30.0",
  "opentelemetry_sdk 0.30.0",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-test",
  "tracing",
+ "tracing-core",
  "tracing-subscriber",
 ]
 

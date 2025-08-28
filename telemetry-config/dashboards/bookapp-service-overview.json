@@ -966,7 +966,8 @@
           "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": true
+          "showLegend": true,
+          "values": ["current"]
         },
         "tooltip": {
           "hideZeros": false,
@@ -983,6 +984,7 @@
           },
           "editorMode": "code",
           "expr": "sum(rate(http_server_request_duration_seconds_count[5m])) by (http_request_method, http_route)",
+          "legendFormat": "{{http_request_method}} {{http_route}}",
           "range": true,
           "refId": "A"
         }
@@ -2031,7 +2033,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "{service_name=~\"$service\"}",
+          "expr": "{service_name=\"bookapp\"}",
           "queryType": "",
           "refId": "A"
         }
@@ -2200,7 +2202,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "tokio_workers_count",
+          "expr": "tokio_runtime_workers_ratio",
           "legendFormat": "Workers: {{service_name}}",
           "range": true,
           "refId": "A"
@@ -2295,7 +2297,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "tokio_alive_tasks",
+          "expr": "tokio_runtime_tasks_active",
           "legendFormat": "Active Tasks: {{service_name}}",
           "range": true,
           "refId": "A"
@@ -2390,7 +2392,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "tokio_spawned_tasks_total",
+          "expr": "tokio_runtime_tasks_spawned_total",
           "legendFormat": "Total Spawned Tasks: {{service_name}}",
           "range": true,
           "refId": "A"
@@ -2485,7 +2487,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "tokio_blocking_threads",
+          "expr": "tokio_runtime_threads_blocking",
           "legendFormat": "Blocking Threads: {{service_name}}",
           "range": true,
           "refId": "A"
@@ -2496,8 +2498,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(tokio_budget_forced_yields[5m])",
-          "legendFormat": "Forced Yields Rate: {{service_name}}",
+          "expr": "rate(tokio_runtime_worker_parks_total[5m])",
+          "legendFormat": "Worker Parks Rate: {{service_name}}",
           "range": true,
           "refId": "B"
         }
