@@ -3,22 +3,22 @@
 #[cfg(feature = "memory-metrics")]
 use opentelemetry::metrics::Meter;
 
-#[cfg(feature = "memory-metrics")]
-use crate::ObservableRegistration;
-
 /// Process memory metrics collector.
 ///
 /// This collector provides basic process memory usage metrics using platform-specific
 /// APIs when the `memory-metrics` feature is enabled.
 #[cfg(feature = "memory-metrics")]
+#[cfg_attr(docsrs, doc(cfg(feature = "memory-metrics")))]
 pub struct ProcessMemoryMetrics;
 
 #[cfg(feature = "memory-metrics")]
+#[cfg_attr(docsrs, doc(cfg(feature = "memory-metrics")))]
 impl ProcessMemoryMetrics {
     /// Register process memory metrics with the provided meter.
     ///
-    /// This creates an observable gauge that reports the current process memory usage.
-    /// The implementation uses platform-specific APIs to gather memory information.
+    /// This creates an observable gauge following OpenTelemetry semantic conventions
+    /// that reports the current process memory usage. The implementation uses
+    /// platform-specific APIs to gather memory information.
     ///
     /// # Errors
     ///
@@ -32,35 +32,48 @@ impl ProcessMemoryMetrics {
     /// ```rust,no_run
     /// # #[cfg(feature = "memory-metrics")]
     /// # {
+    /// use opentelemetry::metrics::MeterProvider;
     /// use opentelemetry_sdk::metrics::SdkMeterProvider;
     /// use tokio_otel_metrics::ProcessMemoryMetrics;
     ///
     /// #[tokio::main]
-    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     ///     let meter_provider = SdkMeterProvider::default();
     ///     let meter = meter_provider.meter("memory");
     ///     
-    ///     let _registration = ProcessMemoryMetrics::register(&meter)?;
+    ///     let _registrations = ProcessMemoryMetrics::register(&meter)?;
     ///     
     ///     // Memory metrics are now being collected
+    ///     // Registrations will be cleaned up when dropped
     ///     
     ///     Ok(())
     /// }
     /// # }
     /// ```
-    pub fn register(meter: &Meter) -> crate::Result<ObservableRegistration> {
-        let _memory_usage_gauge = meter
-            .u64_observable_gauge("process_memory_usage_bytes")
-            .with_description("Process memory usage in bytes (RSS)")
+    pub fn register(meter: &Meter) -> crate::Result<crate::MetricRegistrations> {
+        // Create instrument following OpenTelemetry semantic conventions
+        let memory_usage = meter
+            .u64_observable_gauge("process.memory.usage")
+            .with_description("Process memory usage")
+            .with_unit("By")
+            .with_callback(move |observer| {
+                if let Some(memory_bytes) = get_memory_usage() {
+                    // Use semantic convention attribute: state="rss" for resident set size
+                    observer.observe(
+                        memory_bytes,
+                        &[opentelemetry::KeyValue::new("state", "rss")],
+                    );
+                }
+            })
             .build();
 
-        let registration = ObservableRegistration::new("process_memory", move || {
-            let memory_bytes = get_memory_usage().unwrap_or(0);
-            vec![("process_memory_usage_bytes".to_string(), memory_bytes)]
-        });
-
-        tracing::info!("Registered process memory metrics");
-        Ok(registration)
+        let metric_registrations =
+            crate::MetricRegistrations::new(vec![crate::ObservableHandle::new(memory_usage)]);
+        tracing::info!(
+            "Registered {} process memory metrics with semantic conventions",
+            metric_registrations.len()
+        );
+        Ok(metric_registrations)
     }
 }
 
@@ -77,13 +90,18 @@ fn get_memory_usage() -> Option<u64> {
 }
 
 #[cfg(not(feature = "memory-metrics"))]
-/// Placeholder for when memory-metrics feature is disabled.
+use opentelemetry::metrics::Meter;
+
+#[cfg(not(feature = "memory-metrics"))]
+/// Disabled memory metrics collector (requires memory-metrics feature).
 pub struct ProcessMemoryMetrics;
 
 #[cfg(not(feature = "memory-metrics"))]
 impl ProcessMemoryMetrics {
     /// This method is only available when the `memory-metrics` feature is enabled.
-    pub fn register(_meter: &Meter) -> crate::Result<()> {
-        Err("ProcessMemoryMetrics requires the 'memory-metrics' feature to be enabled".into())
+    pub fn register(_meter: &Meter) -> crate::Result<crate::MetricRegistrations> {
+        Err(crate::Error::FeatureNotEnabled {
+            feature: "memory-metrics",
+        })
     }
 }

@@ -30,7 +30,7 @@ use utoipa::OpenApi;
     ),
     tag = "Books"
 )]
-#[tracing::instrument(skip(db_pools), fields(num_books))]
+#[tracing::instrument(skip(db_pools), fields(num_books, http.request.method = "GET", http.route = "/books", url.path = "/books"))]
 async fn get_all_books(
     Extension(db_pools): Extension<DatabasePools>,
 ) -> Result<Json<Vec<Book>>, StatusCode> {
@@ -39,10 +39,12 @@ async fn get_all_books(
     match repo.find_all().await {
         Ok(books) => {
             tracing::Span::current().record("num_books", books.len() as i64);
+            tracing::Span::current().record("http.response.status_code", 200);
             Ok(Json(books))
         }
         Err(e) => {
             tracing::error!(error_details=%e, "Failed to get all books");
+            tracing::Span::current().record("http.response.status_code", 503);
             Err(StatusCode::SERVICE_UNAVAILABLE)
         }
     }
@@ -60,7 +62,7 @@ async fn get_all_books(
     ),
     tag = "Books"
 )]
-#[tracing::instrument(skip(db_pools), ret(level = Level::TRACE))]
+#[tracing::instrument(skip(db_pools), ret(level = Level::TRACE), fields(book_id = %id, http.request.method = "GET", http.route = "/books/{id}", url.path = tracing::field::Empty))]
 async fn get_book(
     Extension(db_pools): Extension<DatabasePools>,
     Path(id): Path<i32>,
@@ -84,15 +86,25 @@ async fn get_book(
     // Add event to current span with book_id as attribute instead of high-cardinality metric dimension
     let span = tracing::Span::current();
     span.record("book_id", id);
+    span.record("url.path", format!("/books/{}", id));
 
     // Increment counter with low-cardinality dimensions (e.g., operation type)
     counter.add(1, &[opentelemetry::KeyValue::new("operation", "get_book")]);
 
     let repo = BookRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
     match repo.find_by_id(id).await {
-        Ok(Some(book)) => Ok(Json(book)),
-        Ok(None) => Err(StatusCode::NOT_FOUND),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        Ok(Some(book)) => {
+            span.record("http.response.status_code", 200);
+            Ok(Json(book))
+        }
+        Ok(None) => {
+            span.record("http.response.status_code", 404);
+            Err(StatusCode::NOT_FOUND)
+        }
+        Err(_) => {
+            span.record("http.response.status_code", 500);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
     }
 }
 
@@ -133,13 +145,16 @@ async fn delete_book(
     ),
     tag = "Books"
 )]
-#[tracing::instrument(skip(db_pools), fields(work.id = %id, work.title = %book_data.work_title))]
+#[tracing::instrument(skip(db_pools), fields(work.id = %id, work.title = %book_data.work_title, http.request.method = "PUT", http.route = "/books/{id}", url.path = tracing::field::Empty))]
 async fn update_book(
     Extension(db_pools): Extension<DatabasePools>,
     Path(id): Path<i32>,
     Json(book_data): Json<BookCreateInput>,
 ) -> Result<Json<i32>, StatusCode> {
     let repo = BookRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
+
+    let span = tracing::Span::current();
+    span.record("url.path", format!("/books/{}", id));
 
     // Load current normalized book (work + primary author), then update title/status
     let existing = repo
@@ -150,6 +165,7 @@ async fn update_book(
         b
     } else {
         // Book doesn't exist, return 0 rows affected (like SQL UPDATE would)
+        span.record("http.response.status_code", 200);
         return Ok(Json(0));
     };
 
@@ -161,11 +177,13 @@ async fn update_book(
 
     match repo.update(current).await {
         Ok(rows_affected) => {
-            tracing::Span::current().record("db.rows_affected", rows_affected);
+            span.record("db.rows_affected", rows_affected);
+            span.record("http.response.status_code", 200);
             Ok(Json(rows_affected))
         }
         Err(e) => {
             tracing::error!(error = %e, "Failed to update book");
+            span.record("http.response.status_code", 404);
             Err(StatusCode::NOT_FOUND)
         }
     }
