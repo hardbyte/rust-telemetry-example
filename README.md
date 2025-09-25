@@ -271,7 +271,7 @@ cp .env.example .env
 # Edit .env to add your SENTRY_DSN if you want error tracking
 
 docker compose build
-docker compose --profile default up
+docker compose --profile ci up
 ```
 
 ### Docker Compose Profiles
@@ -284,20 +284,14 @@ The project uses Docker Compose profiles to support different deployment scenari
 To run specific profiles:
 
 ```shell
-# Run full application stack (recommended)
-docker compose --profile default up
+# Run full application stackdocker compose up -d
 
-# Run detached (background)
-docker compose --profile default up -d
-
-# Run only infrastructure for development/testing
+# Run with test container
 docker compose --profile ci up
 
 # Run specific services (without profiles)
 docker compose up db kafka telemetry
 ```
-
-**Note**: Due to service profiles, you must specify `--profile default` to run the complete application stack including the main app and backend services.
 
 
 ## Key Endpoints
@@ -641,7 +635,7 @@ docker compose up -d db
 cargo install sqlx-cli --no-default-features --features native-tls,postgres
 
 # Set database connection
-export DATABASE_URL="postgres://postgres:password@localhost:5432/bookapp"
+export DATABASE_URL="postgres://postgres:password@$(docker compose port db 5432)/bookapp"
 
 # Navigate to DAL crate
 cd bookapp-dal
@@ -681,8 +675,10 @@ After modifying database queries, update the prepared query metadata:
 
 ```shell
 cd bookapp-dal
-export DATABASE_URL="postgres://postgres:password@localhost:5432/bookapp"
+export DATABASE_URL="postgres://postgres:password@$(docker compose port db 5432)/bookapp"
+
 cargo sqlx prepare
+
 # Commit the updated .sqlx/ directory
 git add .sqlx && git commit -m "Update SQLx query metadata"
 ```
