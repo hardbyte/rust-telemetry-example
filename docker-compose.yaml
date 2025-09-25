@@ -1,5 +1,5 @@
 services:
-
+  # The core services shouldn't be assigned profiles so they are always enabled and automatically started.
   app:
     build: .
     environment:
@@ -13,8 +13,8 @@ services:
       SENTRY_ENVIRONMENT: "development"
       SENTRY_RELEASE: "bookapp@1.0.0"
     ports:
-      - "8000:8000"
-      - "6669:6669"  # Console subscriber port for main app
+      - "8000"
+      - "6669"
     depends_on:
       kafka:
         condition: service_healthy
@@ -37,8 +37,8 @@ services:
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_ENVIRONMENT: "development"
       SENTRY_RELEASE: "backend@1.0.0"
-    #ports:
-    #  - "6670:6670"  # Console subscriber port for backend
+    ports:
+      - "8000"
     depends_on:
       app:
         condition: service_started
@@ -55,7 +55,7 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: bookapp
     ports:
-      - "5432:5432"
+      - "5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
@@ -82,7 +82,7 @@ services:
       retries: 5
       start_period: 20s
     ports:
-      - "9092:9092"
+      - "9092"
 
 
   telemetry:
@@ -102,10 +102,10 @@ services:
       # other environment variables can be set here e.g., if otelcol is forwarding to Axiom:
       #AXIOM_API_KEY: ''
     ports:
-      - "4317:4317"
-      - "4318:4318"
-      - "3000:3000"
-      - "3200:3200"
+      - "4317"
+      - "4318"
+      - "3000"
+      - "3200"
     volumes:
       - ./telemetry-config/tempo-config.yaml:/otel-lgtm/tempo-config.yaml
       - ./telemetry-config/otelcon-config.yaml:/otel-lgtm/otelcol-config.yaml
@@ -116,6 +116,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 
   integration-tester:
+    profiles: [ci]
     build:
       context: .
       target: builder # Use the builder stage from the Dockerfile
