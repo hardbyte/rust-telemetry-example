@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod observability_tests {
+    #![allow(clippy::module_inception)]
+    #![allow(dead_code)]
     use crate::book_details::{BookDetailsProvider, StubBookDetailsProvider};
     use crate::database::DatabasePools;
     use axum::{
@@ -142,7 +144,7 @@ mod observability_tests {
 
         // For now, we verify the requests completed, which means metrics
         // instrumentation didn't cause errors
-        assert!(true, "Metrics instrumentation completed without errors");
+        tracing::info!("Metrics instrumentation completed without errors");
     }
 
     #[sqlx::test(migrations = "../bookapp-dal/migrations")]
@@ -189,9 +191,10 @@ mod observability_tests {
 
         // 3. Long query - should log warning
         let long_query = "a".repeat(250);
+        let search_path = format!("/books/search?q={}&limit=5", long_query);
         let req = Request::builder()
             .method("GET")
-            .uri(&format!("/books/search?q={}&limit=5", long_query))
+            .uri(search_path)
             .body(Body::empty())
             .unwrap();
 
@@ -205,7 +208,7 @@ mod observability_tests {
         // 4. Check that structured fields are present
         // 5. Verify error logs contain proper context
 
-        assert!(true, "Logging instrumentation completed without errors");
+        tracing::info!("Logging instrumentation completed without errors");
     }
 
     #[sqlx::test(migrations = "../bookapp-dal/migrations")]
@@ -244,7 +247,7 @@ mod observability_tests {
         // 3. Check that appropriate log entries were generated
         // 4. Verify timing information is recorded
 
-        assert!(true, "Materialized view refresh observability working");
+        tracing::info!("Materialized view refresh observability working");
     }
 
     #[sqlx::test(migrations = "../bookapp-dal/migrations")]
@@ -311,7 +314,7 @@ mod observability_tests {
             .iter()
             .any(|r| r["work_title"].as_str().unwrap().contains("Correlation")));
 
-        assert!(true, "End-to-end observability correlation test completed");
+        tracing::info!("End-to-end observability correlation test completed");
     }
 
     #[test]
@@ -340,6 +343,6 @@ mod observability_tests {
         // - High-cardinality attributes are avoided
         // - Appropriate use of tracing::instrument vs manual spans
 
-        assert!(true, "Observability configuration follows best practices");
+        tracing::info!("Observability configuration follows best practices");
     }
 }

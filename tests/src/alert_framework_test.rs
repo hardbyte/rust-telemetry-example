@@ -6,6 +6,8 @@ use tokio::time::{sleep, Duration};
 // Import the generated Progenitor client for API calls
 use client::{Client as BookappClient, ClientState};
 
+const TELEMETRY_BASE_URL_DEFAULT: &str = "http://localhost:3000";
+
 // Test result types
 type TestResult<T> = Result<T, AlertTestError>;
 
@@ -33,6 +35,7 @@ impl std::fmt::Display for AlertTestError {
 impl std::error::Error for AlertTestError {}
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct GrafanaAlert {
     #[serde(rename = "generatorURL")]
     generator_url: String,
@@ -69,7 +72,9 @@ async fn test_alert_framework_connectivity() -> TestResult<()> {
 
     // Test 1: Grafana API connectivity
     println!("📊 Testing Grafana alerts API...");
-    let grafana_url = "http://localhost:3000/api/alertmanager/grafana/api/v2/alerts";
+    let telemetry_base = std::env::var("TELEMETRY_BASE_URL")
+        .unwrap_or_else(|_| TELEMETRY_BASE_URL_DEFAULT.to_string());
+    let grafana_url = format!("{}/api/alertmanager/grafana/api/v2/alerts", telemetry_base);
     let response = http_client
         .get(grafana_url)
         .basic_auth("admin", Some("admin"))
@@ -100,7 +105,10 @@ async fn test_alert_framework_connectivity() -> TestResult<()> {
 
     // Test 2: Prometheus API connectivity via Grafana proxy
     println!("📈 Testing Prometheus API via Grafana proxy...");
-    let prometheus_url = "http://localhost:3000/api/datasources/proxy/1/api/v1/query?query=up";
+    let prometheus_url = format!(
+        "{}/api/datasources/proxy/1/api/v1/query?query=up",
+        telemetry_base
+    );
     let response = http_client
         .get(prometheus_url)
         .basic_auth("admin", Some("admin"))
@@ -127,17 +135,17 @@ async fn test_alert_framework_connectivity() -> TestResult<()> {
         )
     })?;
 
-    println!(
-        "✅ Prometheus returned {} metrics",
-        prom_response.data.result.len()
-    );
+    let metric_count = prom_response.data.result.len();
+    println!("✅ Prometheus returned {} metrics", metric_count);
 
     // Test 3: Application API connectivity
     println!("🚀 Testing application API...");
     let client_state = ClientState::default();
-    let bookapp_client = BookappClient::new("http://localhost:8000", client_state);
+    let app_base =
+        std::env::var("APP_BASE_URL").unwrap_or_else(|_| "http://localhost:8000".to_string());
+    let bookapp_client = BookappClient::new(&app_base, client_state);
 
-    let books_response = bookapp_client.get_all_books().send().await.map_err(|e| {
+    let _books_response = bookapp_client.get_all_books().send().await.map_err(|e| {
         AlertTestError::new("app_connectivity", format!("Failed to get books: {}", e))
     })?;
 
@@ -145,9 +153,12 @@ async fn test_alert_framework_connectivity() -> TestResult<()> {
 
     // Test 4: Span metrics collection
     println!("📊 Testing span metrics collection...");
-    let span_metrics_url = "http://localhost:3000/api/datasources/proxy/1/api/v1/query?query=traces_spanmetrics_calls_total";
+    let span_metrics_url = format!(
+        "{}/api/datasources/proxy/1/api/v1/query?query=traces_spanmetrics_calls_total",
+        telemetry_base
+    );
     let response = http_client
-        .get(span_metrics_url)
+        .get(&span_metrics_url)
         .basic_auth("admin", Some("admin"))
         .send()
         .await
@@ -165,10 +176,8 @@ async fn test_alert_framework_connectivity() -> TestResult<()> {
         )
     })?;
 
-    println!(
-        "✅ Found {} span metrics series",
-        prom_response.data.result.len()
-    );
+    let span_series = prom_response.data.result.len();
+    println!("✅ Found {} span metrics series", span_series);
 
     // Test 5: Load generation capability
     println!("🔥 Testing load generation...");
@@ -182,7 +191,7 @@ async fn test_alert_framework_connectivity() -> TestResult<()> {
 
     // Verify metrics increased
     let response = http_client
-        .get(span_metrics_url)
+        .get(&span_metrics_url)
         .basic_auth("admin", Some("admin"))
         .send()
         .await
@@ -200,7 +209,11 @@ async fn test_alert_framework_connectivity() -> TestResult<()> {
         )
     })?;
 
-    println!("✅ Load generation test complete - metrics collection verified");
+    let post_load_series = prom_response.data.result.len();
+    println!(
+        "✅ Load generation test complete - metrics collection verified ({} series)",
+        post_load_series
+    );
 
     // Test 6: Error generation capability
     println!("💥 Testing error generation...");
@@ -221,7 +234,9 @@ async fn test_alert_detection_capability() -> TestResult<()> {
     let http_client = HttpClient::new();
 
     // Get current alerts
-    let grafana_url = "http://localhost:3000/api/alertmanager/grafana/api/v2/alerts";
+    let telemetry_base = std::env::var("TELEMETRY_BASE_URL")
+        .unwrap_or_else(|_| TELEMETRY_BASE_URL_DEFAULT.to_string());
+    let grafana_url = format!("{}/api/alertmanager/grafana/api/v2/alerts", telemetry_base);
     let response = http_client
         .get(grafana_url)
         .basic_auth("admin", Some("admin"))
@@ -307,8 +322,11 @@ async fn test_alert_detection_capability() -> TestResult<()> {
 }
 
 async fn query_prometheus_scalar(http_client: &HttpClient, query: &str) -> TestResult<f64> {
+    let telemetry_base = std::env::var("TELEMETRY_BASE_URL")
+        .unwrap_or_else(|_| TELEMETRY_BASE_URL_DEFAULT.to_string());
     let url = format!(
-        "http://localhost:3000/api/datasources/proxy/1/api/v1/query?query={}",
+        "{}/api/datasources/proxy/1/api/v1/query?query={}",
+        telemetry_base,
         urlencoding::encode(query)
     );
 

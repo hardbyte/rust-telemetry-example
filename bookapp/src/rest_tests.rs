@@ -48,7 +48,7 @@ mod tests {
         serde_json::from_slice(&body_bytes).unwrap()
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_get_all_books(pool: PgPool) {
         let app = setup_transactional_test_app(pool).await;
         let response = app
@@ -67,7 +67,7 @@ mod tests {
         assert!(json.is_array(), "Response should be an array of books");
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_get_existing_book(pool: PgPool) {
         // Create a book to ensure it exists
         let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
@@ -99,7 +99,7 @@ mod tests {
         assert_eq!(json["status"], "Available");
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_get_nonexistent_book(pool: PgPool) {
         let app = setup_transactional_test_app(pool).await;
         let response = app
@@ -115,7 +115,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_update_existing_book(pool: PgPool) {
         // Create a book to update
         let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
@@ -143,7 +143,7 @@ mod tests {
         assert_eq!(updated_book.work_title, "Updated Title");
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_update_nonexistent_book(pool: PgPool) {
         let app = setup_transactional_test_app(pool).await;
         let req = Request::builder()
@@ -163,7 +163,7 @@ mod tests {
         assert_eq!(json, 0); // 0 rows affected
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_update_book_invalid_json(pool: PgPool) {
         let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
         let input = BookCreateInput {
@@ -186,7 +186,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_create_book_success(pool: PgPool) {
         let app = setup_transactional_test_app(pool.clone()).await;
         let req = Request::builder()
@@ -212,7 +212,7 @@ mod tests {
         assert!(matches!(created_book.status, BookStatus::Available));
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_create_book_invalid_json(pool: PgPool) {
         let app = setup_transactional_test_app(pool).await;
         let req = Request::builder()
@@ -226,7 +226,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_create_book_missing_fields(pool: PgPool) {
         let app = setup_transactional_test_app(pool).await;
         let req = Request::builder()
@@ -241,7 +241,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_bulk_create_books_success(pool: PgPool) {
         let app = setup_transactional_test_app(pool.clone()).await;
         let req = Request::builder()
@@ -271,7 +271,7 @@ mod tests {
         }
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_bulk_create_books_empty_array(pool: PgPool) {
         let app = setup_transactional_test_app(pool).await;
         let req = Request::builder()
@@ -289,7 +289,7 @@ mod tests {
         assert_eq!(json.as_array().unwrap().len(), 0);
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_bulk_create_books_invalid_json(pool: PgPool) {
         let app = setup_transactional_test_app(pool).await;
         let req = Request::builder()
@@ -303,7 +303,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_delete_existing_book(pool: PgPool) {
         // Create a book to delete
         let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
@@ -334,7 +334,7 @@ mod tests {
         assert_eq!(get_response.status(), StatusCode::NOT_FOUND);
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_delete_nonexistent_book(pool: PgPool) {
         let app = setup_transactional_test_app(pool).await;
         let req = Request::builder()
@@ -364,7 +364,7 @@ mod tests {
             .layer(Extension(producer))
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_authors_create_and_list(pool: PgPool) {
         let app = setup_full_test_app(pool.clone()).await;
 
@@ -407,7 +407,7 @@ mod tests {
         assert!(arr.iter().any(|a| a["name"] == "Test Author"));
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_works_create_creates_event(pool: PgPool) {
         let app = setup_full_test_app(pool.clone()).await;
 
@@ -436,7 +436,7 @@ mod tests {
         );
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_editions_create_for_work(pool: PgPool) {
         let app = setup_full_test_app(pool.clone()).await;
 
@@ -475,7 +475,7 @@ mod tests {
         assert_eq!(edition.isbn, "1234567890123");
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_series_create_and_add_work(pool: PgPool) {
         let app = setup_full_test_app(pool.clone()).await;
 

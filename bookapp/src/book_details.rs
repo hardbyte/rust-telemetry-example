@@ -4,6 +4,7 @@ use tracing::instrument;
 
 /// A trait for providing detailed book information from external sources
 #[async_trait]
+#[allow(dead_code)]
 pub trait BookDetailsProvider: Send + Sync {
     /// Enriches a collection of books with additional details from external sources
     async fn enrich_book_details(&self, books: &[Book]);
@@ -11,6 +12,7 @@ pub trait BookDetailsProvider: Send + Sync {
 
 /// Production implementation of BookDetailsProvider with external API integration
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct RemoteBookDetailsProvider;
 
 #[async_trait]
@@ -44,6 +46,7 @@ impl RemoteBookDetailsProvider {
 }
 
 /// Test implementation of BookDetailsProvider
+#[allow(dead_code)]
 pub struct StubBookDetailsProvider;
 
 #[async_trait]

@@ -1,9 +1,5 @@
-mod book_enrichment;
-mod book_ingestion;
-mod scheduled_tasks;
-mod search_refresh;
-
 use anyhow::Result;
+use backend::{book_ingestion, scheduled_tasks, search_refresh};
 use book_ingestion::OutboxPublisherConfig;
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
 use rdkafka::client::DefaultClientContext;
@@ -28,8 +24,13 @@ async fn main() -> Result<()> {
     // Initialize tracing and observability
     let observability_config =
         observability_utils::ObservabilityConfig::new("backend").with_console_port(6670);
-    let (trace_provider, meter_provider, log_provider, sentry_guard, _task_tracking_registrations) =
-        observability_utils::init_tracing(observability_config.clone());
+    let (
+        _trace_provider,
+        meter_provider,
+        _log_provider,
+        sentry_guard,
+        _task_tracking_registrations,
+    ) = observability_utils::init_tracing(observability_config.clone());
 
     info!("Starting backend service");
 

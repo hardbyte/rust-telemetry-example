@@ -7,6 +7,7 @@ use matchit::Router as MatchRouter;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgPool};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -25,6 +26,8 @@ pub struct ErrorInjectionConfig {
     error_code: i32,
     /// Optional custom error message to return.
     error_message: Option<String>,
+    /// Optional latency in milliseconds to inject before processing the request.
+    latency_ms: Option<i32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -34,6 +37,7 @@ pub struct ErrorInjectionConfigInput {
     error_rate: f64,
     error_code: i32,
     error_message: Option<String>,
+    latency_ms: Option<i32>,
 }
 
 /// Trait that defines the storage interface for error injection configurations.
@@ -102,12 +106,56 @@ impl PostgresErrorInjectionConfigStore {
     }
 }
 
+fn normalize_endpoint_pattern(pattern: &str) -> Cow<'_, str> {
+    let needs_normalization = pattern.as_bytes().iter().any(|b| matches!(b, b':' | b'*'));
+    if !needs_normalization {
+        return Cow::Borrowed(pattern);
+    }
+
+    let mut normalized = String::with_capacity(pattern.len() + 4);
+    let trimmed = pattern.trim_start_matches('/');
+
+    if pattern.starts_with('/') {
+        normalized.push('/');
+    }
+
+    let mut first_segment = true;
+    for segment in trimmed.split('/') {
+        if !first_segment {
+            normalized.push('/');
+        }
+        first_segment = false;
+
+        if segment.is_empty() {
+            continue;
+        } else if segment.starts_with('{') {
+            normalized.push_str(segment);
+        } else if segment.starts_with(':') && segment.len() > 1 {
+            normalized.push('{');
+            normalized.push_str(&segment[1..]);
+            normalized.push('}');
+        } else if segment.starts_with('*') && segment.len() > 1 {
+            normalized.push_str("{*");
+            normalized.push_str(&segment[1..]);
+            normalized.push('}');
+        } else {
+            normalized.push_str(segment);
+        }
+    }
+
+    if pattern.ends_with('/') && !normalized.ends_with('/') {
+        normalized.push('/');
+    }
+
+    Cow::Owned(normalized)
+}
+
 #[async_trait]
 impl ErrorInjectionConfigStore for PostgresErrorInjectionConfigStore {
     async fn get_all_configs(&self) -> anyhow::Result<Vec<ErrorInjectionConfig>> {
         let configs: Vec<ErrorInjectionConfig> = sqlx::query_as(
             r#"
-            SELECT id, endpoint_pattern, http_method, error_rate, error_code, error_message
+            SELECT id, endpoint_pattern, http_method, error_rate, error_code, error_message, latency_ms
             FROM error_injection_config
             LIMIT 1000
             "#,
@@ -124,7 +172,7 @@ impl ErrorInjectionConfigStore for PostgresErrorInjectionConfigStore {
     ) -> anyhow::Result<Vec<ErrorInjectionConfig>> {
         let configs: Vec<ErrorInjectionConfig> = sqlx::query_as(
             r#"
-            SELECT id, endpoint_pattern, http_method, error_rate, error_code, error_message
+            SELECT id, endpoint_pattern, http_method, error_rate, error_code, error_message, latency_ms
             FROM error_injection_config
             WHERE http_method = $1
             LIMIT 100
@@ -143,9 +191,9 @@ impl ErrorInjectionConfigStore for PostgresErrorInjectionConfigStore {
     ) -> anyhow::Result<ErrorInjectionConfig> {
         let inserted_config = sqlx::query_as::<_, ErrorInjectionConfig>(
             r#"
-            INSERT INTO error_injection_config (endpoint_pattern, http_method, error_rate, error_code, error_message)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id, endpoint_pattern, http_method, error_rate, error_code, error_message
+            INSERT INTO error_injection_config (endpoint_pattern, http_method, error_rate, error_code, error_message, latency_ms)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id, endpoint_pattern, http_method, error_rate, error_code, error_message, latency_ms
             "#
         )
             .bind(input.endpoint_pattern)
@@ -153,6 +201,7 @@ impl ErrorInjectionConfigStore for PostgresErrorInjectionConfigStore {
             .bind(input.error_rate)
             .bind(input.error_code)
             .bind(input.error_message)
+            .bind(input.latency_ms)
             .fetch_one(self.pool.as_ref())
             .await?;
 
@@ -167,9 +216,9 @@ impl ErrorInjectionConfigStore for PostgresErrorInjectionConfigStore {
         let updated_config = sqlx::query_as::<_, ErrorInjectionConfig>(
             r#"
             UPDATE error_injection_config
-            SET endpoint_pattern = $2, http_method = $3, error_rate = $4, error_code = $5, error_message = $6
+            SET endpoint_pattern = $2, http_method = $3, error_rate = $4, error_code = $5, error_message = $6, latency_ms = $7
             WHERE id = $1
-            RETURNING id, endpoint_pattern, http_method, error_rate, error_code, error_message
+            RETURNING id, endpoint_pattern, http_method, error_rate, error_code, error_message, latency_ms
             "#
         )
             .bind(id)
@@ -178,6 +227,7 @@ impl ErrorInjectionConfigStore for PostgresErrorInjectionConfigStore {
             .bind(input.error_rate)
             .bind(input.error_code)
             .bind(input.error_message)
+            .bind(input.latency_ms)
             .fetch_one(self.pool.as_ref())
             .await?;
 
@@ -200,6 +250,7 @@ impl ErrorInjectionConfigStore for PostgresErrorInjectionConfigStore {
 
 /// Cached wrapper around ErrorInjectionConfigStore to reduce database load
 #[derive(Clone)]
+#[allow(clippy::type_complexity)]
 pub struct CachedErrorInjectionConfigStore {
     inner: Arc<dyn ErrorInjectionConfigStore>,
     cache: Arc<RwLock<HashMap<String, (Vec<ErrorInjectionConfig>, Instant)>>>,
@@ -432,10 +483,24 @@ pub async fn error_injection_middleware(
 ) -> impl IntoResponse {
     let path = req.uri().path().to_string();
     let method = req.method().as_str().to_string();
+    tracing::debug!(path = %path, method = %method, "Checking latency injection config");
 
     // Query the store for matching error injection configurations
     if let Some(config) = get_matching_error_injection_config(store, &path, &method).await {
         tracing::Span::current().record("error_rate", config.error_rate);
+
+        // Inject latency if configured
+        if let Some(latency_ms) = config.latency_ms {
+            if latency_ms > 0 {
+                tracing::debug!(
+                    path = path,
+                    method = method,
+                    latency_ms = latency_ms,
+                    "Injecting latency"
+                );
+                tokio::time::sleep(Duration::from_millis(latency_ms as u64)).await;
+            }
+        }
 
         // Generate a random number between 0.0 and 1.0
         let mut rng = rand::rng();
@@ -530,18 +595,47 @@ async fn get_matching_error_injection_config(
 
     // Use matchit crate for path matching
     let mut router = MatchRouter::new();
+    let mut patterns = Vec::with_capacity(configs.len());
+    let mut normalized_patterns = Vec::with_capacity(configs.len());
 
     for config in configs {
+        let normalized_pattern = normalize_endpoint_pattern(&config.endpoint_pattern);
         // Add the endpoint_pattern to the router
-        let _ = router.insert(&config.endpoint_pattern, config.clone());
+        tracing::debug!(
+            pattern = %config.endpoint_pattern,
+            normalized_pattern = %normalized_pattern,
+            "Registering latency pattern"
+        );
+        patterns.push(config.endpoint_pattern.clone());
+        normalized_patterns.push(normalized_pattern.to_string());
+        if let Err(err) = router.insert(normalized_pattern.as_ref(), config.clone()) {
+            tracing::warn!(
+                ?err,
+                pattern = %config.endpoint_pattern,
+                normalized_pattern = %normalized_pattern,
+                http_method = %method,
+                "Failed to register latency pattern"
+            );
+        }
     }
 
-    if let Ok(matched) = router.at(path) {
-        let config = matched.value.clone();
-        tracing::trace!(config = ?config, "There was a matching error injection config");
-        Some(config)
-    } else {
-        None
+    match router.at(path) {
+        Ok(matched) => {
+            let config = matched.value.clone();
+            tracing::info!(config = ?config, "Latency config matched");
+            Some(config)
+        }
+        Err(err) => {
+            tracing::warn!(
+                ?err,
+                path = %path,
+                http_method = %method,
+                available_patterns = ?patterns,
+                available_normalized_patterns = ?normalized_patterns,
+                "Latency config lookup failed"
+            );
+            None
+        }
     }
 }
 

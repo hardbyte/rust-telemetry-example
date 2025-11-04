@@ -97,12 +97,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Create Progenitor client with OpenTelemetry context injection built-in
     let client_state = ClientState::default();
-    let bookapp_client = BookappClient::new(&args.app_url, client_state);
+    let _bookapp_client = BookappClient::new(&args.app_url, client_state);
 
     info!("✅ Bookapp client initialized with automatic tracing");
 
     // Test connectivity first
-    // test_connectivity(&bookapp_client).await?;
+    // test_connectivity(&_bookapp_client).await?;
     info!("⏩ Skipping connectivity test for now...");
 
     // Generate sample books
@@ -110,7 +110,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     info!("📚 Generated {} sample books for ingestion", books.len());
 
     // Create books using concurrent workers
-    let chunk_size = (args.count + args.workers - 1) / args.workers; // Round up division
+    let workers = args.workers.max(1);
+    let chunk_size = args.count.div_ceil(workers).max(1);
     let mut tasks = Vec::new();
 
     for (worker_id, book_chunk) in books.chunks(chunk_size).enumerate() {

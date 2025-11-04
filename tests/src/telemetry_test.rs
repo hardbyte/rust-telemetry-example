@@ -623,12 +623,13 @@ async fn test_error_endpoint_generates_error_trace() -> TestResult<()> {
 
     let http_client = HttpClient::new();
 
-    // Configure error injection with unique endpoint pattern
+    // Configure error injection against a unique, numeric path so the handler executes
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis();
-    let test_endpoint = format!("/books/test-{timestamp}");
+    let numeric_id = (timestamp % (i32::MAX as u128)) as i32;
+    let test_endpoint = format!("/books/{numeric_id}");
     let error_injection_config = serde_json::json!({
         "endpoint_pattern": test_endpoint.clone(),
         "http_method": "GET",
@@ -651,17 +652,55 @@ async fn test_error_endpoint_generates_error_trace() -> TestResult<()> {
         ));
     }
 
-    // Make a request that should fail
-    let response = http_client
-        .get(format!("{}{}", config.app_url, test_endpoint))
-        .send()
+    let created_config: serde_json::Value = response
+        .json()
         .await
-        .map_err(|e| TestError::new("http_request_error_case", e.to_string()))?;
+        .map_err(|e| TestError::new("error_injection_setup", e.to_string()))?;
+    let config_id = created_config["id"].as_i64().ok_or_else(|| {
+        TestError::new(
+            "error_injection_setup",
+            "Created config missing numeric id".to_string(),
+        )
+    })?;
 
-    assert_eq!(
-        response.status(),
-        reqwest::StatusCode::INTERNAL_SERVER_ERROR
-    );
+    // Make a request that should fail
+    let error_status_expected = reqwest::StatusCode::INTERNAL_SERVER_ERROR;
+    let mut response = None;
+    const MAX_ATTEMPTS: usize = 5;
+    for attempt in 1..=MAX_ATTEMPTS {
+        let candidate = http_client
+            .get(format!("{}{}", config.app_url, test_endpoint))
+            .send()
+            .await
+            .map_err(|e| TestError::new("http_request_error_case", e.to_string()))?;
+
+        if candidate.status() == error_status_expected {
+            response = Some(candidate);
+            break;
+        }
+
+        if attempt < MAX_ATTEMPTS {
+            println!(
+                "⏳ Error endpoint returned {} (attempt {}/{}) – retrying...",
+                candidate.status(),
+                attempt,
+                MAX_ATTEMPTS
+            );
+            tokio::time::sleep(Duration::from_millis(200 * attempt as u64)).await;
+        } else {
+            return Err(TestError::new(
+                "http_request_error_case",
+                format!(
+                    "Expected status {} from injected endpoint after {} attempts, last status {}",
+                    error_status_expected,
+                    MAX_ATTEMPTS,
+                    candidate.status()
+                ),
+            ));
+        }
+    }
+
+    let response = response.expect("response must be present after successful attempt");
 
     let trace_id = if let Some(traceparent) = response.headers().get("traceparent") {
         if let Ok(traceparent_str) = traceparent.to_str() {
@@ -691,6 +730,12 @@ async fn test_error_endpoint_generates_error_trace() -> TestResult<()> {
 
     // Verify that the trace exists in Tempo and has an error status
     query_tempo_for_trace_with_error_status(&http_client, &trace_id, &config).await?;
+
+    // Best-effort cleanup so other tests see normal responses
+    let _ = http_client
+        .delete(format!("{}/error-injection/{}", config.app_url, config_id))
+        .send()
+        .await;
 
     println!("✅ Error telemetry test completed successfully!");
     Ok(())
@@ -1431,7 +1476,7 @@ fn verify_trace_data(trace_data: &TempoResponse) -> TestResult<()> {
     }
 
     // Verify we have spans from bookapp service (at minimum)
-    let bookapp_spans = vec!["create_book", "POST /books/add"];
+    let bookapp_spans = ["create_book", "POST /books/add"];
     let has_bookapp_span = bookapp_spans.iter().any(|span| found_spans.contains(*span));
 
     if !has_bookapp_span {
@@ -1555,7 +1600,7 @@ async fn search_for_backend_traces(
     println!("🔍 Searching for backend traces in Tempo");
 
     // Search for traces from backend service
-    let trace_query = format!("{{resource.service.name=\"backend\"}}");
+    let trace_query = "{resource.service.name=\"backend\"}".to_string();
 
     for attempt in 1..=MAX_TEMPO_ATTEMPTS {
         println!(
@@ -1712,16 +1757,30 @@ async fn test_backend_workers_independent_traces() -> TestResult<()> {
     for (root_trace_name, description) in &backend_workers {
         println!("🔍 Searching for traces from: {}", description);
 
-        // Search for traces from this specific worker
-        let search_result = search_backend_worker_traces_by_operation(
-            &http_client,
-            &config,
-            root_trace_name,
-            search_time_range,
-        )
-        .await?;
+        let mut search_result: TempoSearchResponse = TempoSearchResponse { traces: Vec::new() };
+        let mut found = false;
 
-        if !search_result.traces.is_empty() {
+        for attempt in 1..=5 {
+            search_result = search_backend_worker_traces_by_operation(
+                &http_client,
+                &config,
+                root_trace_name,
+                search_time_range,
+            )
+            .await?;
+
+            if !search_result.traces.is_empty() {
+                found = true;
+                break;
+            }
+
+            if attempt < 5 {
+                let backoff = std::cmp::min(2 * attempt as u64, 10);
+                tokio::time::sleep(Duration::from_secs(backoff)).await;
+            }
+        }
+
+        if found {
             found_workers.push((root_trace_name.to_string(), search_result.traces.len()));
             println!(
                 "✅ Found {} traces for {}",
@@ -1729,7 +1788,6 @@ async fn test_backend_workers_independent_traces() -> TestResult<()> {
                 root_trace_name
             );
 
-            // Validate trace independence - each trace should have distinct trace IDs
             let trace_ids: std::collections::HashSet<String> = search_result
                 .traces
                 .iter()
@@ -1746,7 +1804,6 @@ async fn test_backend_workers_independent_traces() -> TestResult<()> {
                 ));
             }
 
-            // Validate at least one trace has proper instrumentation
             if let Some(trace) = search_result.traces.first() {
                 let trace_valid = validate_worker_trace_structure(
                     &http_client,
@@ -1764,7 +1821,10 @@ async fn test_backend_workers_independent_traces() -> TestResult<()> {
                 }
             }
         } else {
-            println!("⚠️  No traces found for {}", root_trace_name);
+            println!(
+                "⚠️  No traces found for {} after multiple attempts",
+                root_trace_name
+            );
         }
     }
 
@@ -1817,7 +1877,7 @@ async fn search_backend_worker_traces_by_operation(
     let url = format!(
         "{}/api/search?q={}&limit=200&start={}&end={}",
         config.tempo_url,
-        urlencoding::encode(&query),
+        urlencoding::encode(query),
         chrono::Utc::now().timestamp() - time_range_seconds as i64,
         chrono::Utc::now().timestamp()
     );
@@ -1849,7 +1909,7 @@ async fn search_backend_worker_traces_by_operation(
         trace
             .root_trace_name
             .as_ref()
-            .map_or(false, |name| name == root_trace_name)
+            .is_some_and(|name| name == root_trace_name)
     });
 
     Ok(all_traces)
@@ -2183,14 +2243,32 @@ async fn validate_kafka_message_published(
 ) -> TestResult<()> {
     println!("🔍 Searching for outbox publisher activity");
 
-    // Search for recent outbox publish traces
-    let outbox_traces = search_outbox_traces(http_client, config, 120).await?; // Last 2 minutes
+    // Search for recent outbox publish traces with retry – the worker runs on a timer
+    const MAX_ATTEMPTS: usize = 5;
+    let mut outbox_traces = Vec::new();
+    for attempt in 1..=MAX_ATTEMPTS {
+        outbox_traces = search_outbox_traces(http_client, config, 120).await?; // Last 2 minutes
 
-    if outbox_traces.is_empty() {
-        return Err(TestError::new(
-            "outbox_validation",
-            "No outbox publisher traces found - events may not be getting published".to_string(),
-        ));
+        if !outbox_traces.is_empty() {
+            break;
+        }
+
+        if attempt < MAX_ATTEMPTS {
+            let backoff = Duration::from_secs((attempt * 2) as u64);
+            println!(
+                "⏳ No outbox traces yet (attempt {}/{}) – retrying in {}s",
+                attempt,
+                MAX_ATTEMPTS,
+                backoff.as_secs()
+            );
+            tokio::time::sleep(backoff).await;
+        } else {
+            return Err(TestError::new(
+                "outbox_validation",
+                "No outbox publisher traces found - events may not be getting published"
+                    .to_string(),
+            ));
+        }
     }
 
     println!("✅ Found {} outbox publisher traces", outbox_traces.len());
@@ -2226,18 +2304,31 @@ async fn validate_backend_processing(
 ) -> TestResult<()> {
     println!("🔍 Searching for backend Kafka message processing");
 
-    let kafka_traces = search_kafka_processing_traces(http_client, config, 120).await?; // Last 2 minutes
+    const MAX_ATTEMPTS: usize = 5;
+    for attempt in 1..=MAX_ATTEMPTS {
+        let kafka_traces = search_kafka_processing_traces(http_client, config, 120).await?; // Last 2 minutes
 
-    if kafka_traces.is_empty() {
-        return Err(TestError::new(
-            "backend_processing_validation",
-            "No Kafka message processing traces found - backend may not be consuming messages"
-                .to_string(),
-        ));
+        if !kafka_traces.is_empty() {
+            println!("✅ Found {} Kafka processing traces", kafka_traces.len());
+            return Ok(());
+        }
+
+        if attempt < MAX_ATTEMPTS {
+            let backoff = Duration::from_secs(2 * attempt as u64 + 2);
+            println!(
+                "⏳ No Kafka processing traces yet (attempt {}/{}) – waiting {}s...",
+                attempt,
+                MAX_ATTEMPTS,
+                backoff.as_secs()
+            );
+            tokio::time::sleep(backoff).await;
+        }
     }
 
-    println!("✅ Found {} Kafka processing traces", kafka_traces.len());
-    Ok(())
+    Err(TestError::new(
+        "backend_processing_validation",
+        "No Kafka message processing traces found after multiple attempts".to_string(),
+    ))
 }
 
 async fn validate_materialized_view_refresh(

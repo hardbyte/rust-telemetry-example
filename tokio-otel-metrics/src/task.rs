@@ -62,6 +62,7 @@ struct TaskMetadata {
     /// Task name/label for identification
     name: String,
     /// Spawn location (file:line format)
+    #[allow(dead_code)]
     location: Option<String>,
     /// Stack size in bytes (if available)
     stack_size: Option<u64>,
@@ -434,17 +435,22 @@ impl TaskMetrics {
                 let config = self.per_task_config.clone();
                 meter
                     .f64_observable_gauge("tokio_task_lifetime_by_name_seconds")
-                    .with_description("Average task lifetime grouped by task name (low cardinality)")
+                    .with_description(
+                        "Average task lifetime grouped by task name (low cardinality)",
+                    )
                     .with_unit("s")
                     .with_callback(move |observer| {
                         let task_map = tasks.lock().unwrap();
-                        let mut task_name_stats: std::collections::HashMap<String, (f64, u32)> = std::collections::HashMap::new();
+                        let mut task_name_stats: std::collections::HashMap<String, (f64, u32)> =
+                            std::collections::HashMap::new();
 
                         // Aggregate by task name
                         for (_task_id, metadata) in task_map.iter() {
                             let lifetime = metadata.created_at.elapsed();
                             if lifetime >= config.min_lifetime_threshold {
-                                let entry = task_name_stats.entry(metadata.name.clone()).or_insert((0.0, 0));
+                                let entry = task_name_stats
+                                    .entry(metadata.name.clone())
+                                    .or_insert((0.0, 0));
                                 entry.0 += lifetime.as_secs_f64();
                                 entry.1 += 1;
                             }
@@ -467,17 +473,21 @@ impl TaskMetrics {
                 let config = self.per_task_config.clone();
                 meter
                     .u64_observable_gauge("tokio_task_count_by_name")
-                    .with_description("Number of active tasks grouped by task name (low cardinality)")
+                    .with_description(
+                        "Number of active tasks grouped by task name (low cardinality)",
+                    )
                     .with_unit("1")
                     .with_callback(move |observer| {
                         let task_map = tasks.lock().unwrap();
-                        let mut task_name_counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+                        let mut task_name_counts: std::collections::HashMap<String, u64> =
+                            std::collections::HashMap::new();
 
                         // Count by task name
                         for (_task_id, metadata) in task_map.iter() {
                             let lifetime = metadata.created_at.elapsed();
                             if lifetime >= config.min_lifetime_threshold {
-                                let count = task_name_counts.entry(metadata.name.clone()).or_insert(0);
+                                let count =
+                                    task_name_counts.entry(metadata.name.clone()).or_insert(0);
                                 *count += 1;
                             }
                         }
@@ -674,10 +684,8 @@ where
                     .file()
                     .map(|f| format!("{}:{}", f, meta.line().unwrap_or(0)));
 
-                self.metrics.task_spawned_with_details(
-                    task_id, task_name, location,
-                    None,
-                );
+                self.metrics
+                    .task_spawned_with_details(task_id, task_name, location, None);
 
                 // Store the task ID in the span's extensions for reliable retrieval later
                 if let Some(span) = ctx.span(id) {
