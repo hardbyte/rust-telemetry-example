@@ -619,6 +619,7 @@ pub fn api_router() -> Router {
 )]
 pub struct ApiDoc;
 
+#[allow(dead_code)]
 async fn serve_openapi() -> axum::response::Json<utoipa::openapi::OpenApi> {
     axum::response::Json(ApiDoc::openapi())
 }

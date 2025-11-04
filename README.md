@@ -686,18 +686,85 @@ git add .sqlx && git commit -m "Update SQLx query metadata"
 
 ## Testing
 
-The project includes comprehensive integration tests that verify end-to-end telemetry functionality:
+### Automated end-to-end runner
 
-```shell
-# Run unit tests
-cargo test --package bookapp
+Use `./run_tests.sh` for a full lint + test + integration pass. The harness now:
 
-# Run DAL unit tests
-cargo test --package bookapp-dal
+- Applies database migrations and refreshes SQLx metadata automatically.
+- Binds each stage (migrations, linting, service bring-up, integration tests) to a dedicated timeout so any hang is detected quickly and the failing step is reported.
+- Streams output to STDOUT **and** saves a timestamped log in `.run_tests/run_tests_YYYYmmdd_HHMMSS.log`.
+- Tears down compose services on exit (even on failure).
+- Exposes knobs for faster iteration:<br/>
+  `RUN_TESTS_SKIP_INTEGRATION=1` to skip the long-running alert validation suite, and<br/>
+  `RUN_TESTS_LOOPBACK=127.0.0.1` to control which interface health probes target (defaults to IPv4 loopback to avoid IPv6 reset issues).
+- Optional OpenTelemetry spans for each step when `RUN_TESTS_OTEL_ENDPOINT` is set (defaults to disabled). The script auto-installs [`otel-cli`](https://github.com/equinix-labs/otel-cli) into `.tools/` if needed and emits spans labelled with duration, timeout, and exit code.
+ - Optional OpenTelemetry spans for each step when `RUN_TESTS_OTEL_ENDPOINT` is set (defaults to disabled). The script auto-installs [`otel-cli`](https://github.com/equinix-labs/otel-cli) into `.tools/` if needed and emits spans with `process.command`, `process.exit.code`, and `run_tests.step.timeout`. Use `RUN_TESTS_OTEL_ENDPOINT=auto` to automatically target the dynamically mapped OTLP gRPC port, or set `RUN_TESTS_OTEL_PROTOCOL=http/protobuf` to push via the HTTP exporter.
+ - `RUN_TESTS_OTEL_DEBUG=1` prints a confirmation line for every span that is emitted.
+ - Set `RUN_TESTS_KEEP_STACK=1` to leave Docker services running after the script completes (handy for inspecting Grafana/Tempo data).
 
-# Run integration tests (requires running services)
-cargo test --package integration-tests
+```bash
+# Default 15 minute timeout, full suite
+./run_tests.sh
 
+# Quick iteration: skip integration tests, keep logs
+RUN_TESTS_SKIP_INTEGRATION=1 ./run_tests.sh
+
+# Emit spans to a collector (example points at local OTLP/gRPC endpoint)
+RUN_TESTS_OTEL_ENDPOINT=auto ./run_tests.sh
+
+# Use OTLP/HTTP instead of gRPC
+RUN_TESTS_OTEL_ENDPOINT=auto RUN_TESTS_OTEL_PROTOCOL=http ./run_tests.sh
+
+# Verbose span logging
+RUN_TESTS_OTEL_DEBUG=1 RUN_TESTS_OTEL_ENDPOINT=auto ./run_tests.sh
+
+# Keep stack up to inspect Grafana/Tempo after the run
+RUN_TESTS_KEEP_STACK=1 ./run_tests.sh
+```
+
+The script exports `SQLX_OFFLINE=true` so compile-time query checks use the cached metadata under `.sqlx/`. If new queries are added the harness will regenerate the metadata; commit the updated directory alongside your change.
+
+### Manual unit tests
+
+```bash
+# Unit tests (requires running Postgres)
+export DATABASE_URL="postgres://postgres:password@localhost:5432/bookapp"
+SQLX_OFFLINE=true cargo test --package bookapp
+SQLX_OFFLINE=true cargo test --package bookapp-dal
+SQLX_OFFLINE=true cargo test --package backend
+```
+
+### Manual integration + alert validation tests
+
+Spin up the stack, set endpoints, then run the desired integration suite. Use `127.0.0.1` to bypass IPv6 loopback resets (Grafana/Tempo are still reachable at `localhost` if you prefer).
+
+```bash
+# Start services (app, backend, Kafka, telemetry, Postgres)
+docker compose up -d --wait --wait-timeout 180
+
+# Discover host ports (Compose publishes random high ports when using short syntax)
+APP_PORT=$(docker compose port app 8000 | awk -F: '{print $2}' | tr -d '\r')
+GRAFANA_PORT=$(docker compose port telemetry 3000 | awk -F: '{print $2}' | tr -d '\r')
+TEMPO_PORT=$(docker compose port telemetry 3200 | awk -F: '{print $2}' | tr -d '\r')
+
+export APP_BASE_URL="http://127.0.0.1:${APP_PORT:-8000}"
+export GRAFANA_BASE_URL="http://127.0.0.1:${GRAFANA_PORT:-3000}"
+export TELEMETRY_BASE_URL="$GRAFANA_BASE_URL"            # via Grafana proxy
+export PROMETHEUS_BASE_URL="$GRAFANA_BASE_URL/api/datasources/proxy/1"
+export TEMPO_BASE_URL="http://127.0.0.1:${TEMPO_PORT:-3200}"
+
+# Run specific suites
+cargo test --package integration-tests --test telemetry_test -- --nocapture
+cargo test --package integration-tests --test alert_framework_test -- --nocapture
+cargo test --package integration-tests --test alert_validation_test -- --nocapture
+
+# Alert validation runtime guidance (approximate):
+# - Error ratio alert: ~2–3 minutes
+# - P95 latency alert: ~4 minutes (new short-lived Grafana rule)
+# Entire file: ~6–7 minutes depending on environment
+
+# Tear down when finished
+docker compose down --remove-orphans
 ```
 
 Integration tests verify:
@@ -707,6 +774,8 @@ Integration tests verify:
 - Cross-service trace correlation
 - Repository pattern functionality and database operations
 - **Alert validation framework**: End-to-end testing of Grafana alerts to ensure they fire correctly when conditions are met
+
+> **Note:** Both alert tests provision short-lived Grafana rules via the Ruler API. The latency test uses `integration_latency_p95_test` with a 30 s evaluation window; the error-ratio test creates a unique `integration_error_ratio_test-*` rule and temporarily pauses it during cooldown so Grafana can settle quickly. Expect occasional Prometheus warnings in the logs—Grafana remains the source of truth for pass/fail.
 
 ## Alert Validation Testing
 
@@ -735,5 +804,4 @@ cargo test --package integration-tests --test alert_validation_test
 
 The framework provides **continuous confidence** that your observability alerts will fire correctly when real issues occur, validating the entire telemetry pipeline: App → OpenTelemetry → Prometheus → Grafana → Alerting.
 
-For detailed documentation, see [`docs/ALERT_VALIDATION_TESTING.md`](docs/ALERT_VALIDATION_TESTING.md).
-
+For detailed documentation, see [`docs/alerts.md`](docs/alerts.md).

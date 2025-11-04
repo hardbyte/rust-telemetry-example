@@ -229,12 +229,11 @@ pub fn init_tracing(
         .with_default(tracing::Level::INFO);
 
     // Custom filter for OpenTelemetry layer that excludes runtime.spawn spans
-    let otel_tracing_filter = tracing_level_filter.and(
-        tracing_subscriber::filter::FilterFn::new(|metadata| {
+    let otel_tracing_filter =
+        tracing_level_filter.and(tracing_subscriber::filter::FilterFn::new(|metadata| {
             // Allow all spans except tokio's runtime.spawn spans (which are handled by TaskTrackingLayer)
             !(metadata.target() == "tokio::task" && metadata.name() == "runtime.spawn")
-        })
-    );
+        }));
 
     // Turn our OTLP pipeline into a tracing layer
     let tracing_opentelemetry_layer = tracing_opentelemetry::layer()

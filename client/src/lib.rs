@@ -1,3 +1,7 @@
+// Allow lifetime elision patterns that appear in generated code
+#![allow(elided_lifetimes_in_paths)]
+#![allow(mismatched_lifetime_syntaxes)]
+
 mod generated;
 mod otel;
 

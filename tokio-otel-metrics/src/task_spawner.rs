@@ -32,9 +32,8 @@ impl TaskSpawner {
 
         // Register the task with our metrics collector
         // Note: We can't easily get stack size at spawn time
-        self.metrics.task_spawned_with_details(
-            task_id, name, location, None,
-        );
+        self.metrics
+            .task_spawned_with_details(task_id, name, location, None);
 
         handle
     }

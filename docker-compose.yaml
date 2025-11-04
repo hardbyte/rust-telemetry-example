@@ -15,10 +15,19 @@ services:
     ports:
       - "8000"
       - "6669"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: on-failure
     depends_on:
       kafka:
         condition: service_healthy
       db:
+        condition: service_healthy
+      telemetry:
         condition: service_healthy
 
   backend:
@@ -32,8 +41,11 @@ services:
       TRACE_SAMPLE_PROBABILITY: 1.0
       KAFKA_BROKER_URL: "kafka:9092"
       KAFKA_GROUP_ID: "backend_consumer_group"
-      SEARCH_REFRESH_MIN_INTERVAL_SECS: ${SEARCH_REFRESH_MIN_INTERVAL_SECS:-30}
-      SEARCH_REFRESH_MAX_STALENESS_SECS: ${SEARCH_REFRESH_MAX_STALENESS_SECS:-300}
+      SEARCH_REFRESH_MIN_INTERVAL_SECS: "5"
+      SEARCH_REFRESH_MAX_STALENESS_SECS: "30"
+      OUTBOX_DEFAULT_TOPIC: "book_ingestion"
+      OUTBOX_POLL_MS: "1000"
+      OUTBOX_BATCH_SIZE: "100"
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_ENVIRONMENT: "development"
       SENTRY_RELEASE: "backend@1.0.0"
@@ -41,11 +53,14 @@ services:
       - "8000"
     depends_on:
       app:
-        condition: service_started
+        condition: service_healthy
       kafka:
         condition: service_healthy
       db:
         condition: service_healthy
+      telemetry:
+        condition: service_healthy
+    restart: on-failure
 
 
   db:
@@ -61,6 +76,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 20s
+    restart: on-failure
 
   kafka:
     image: bitnami/kafka:latest
@@ -80,9 +97,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      start_period: 45s
     ports:
       - "9092"
+    restart: on-failure
 
 
   telemetry:
@@ -92,8 +110,11 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "cat", "/tmp/ready"]
+      interval: 10s
       timeout: 30s
       retries: 10
+      start_period: 45s
+    restart: on-failure
     environment:
       ENABLE_LOGS_OTELCOL: 'true'
       GF_AUTH_ANONYMOUS_ORG_NAME: 'Main Org.'
