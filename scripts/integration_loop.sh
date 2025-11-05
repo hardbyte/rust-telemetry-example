@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Repeatedly run the integration test crate (telemetry + alert validation) to shake out flakes.
-# Usage: INTEGRATION_LOOP_ITERATIONS=30 ./integration_loop.sh
+# Usage: INTEGRATION_LOOP_ITERATIONS=30 ./scripts/integration_loop.sh
 # Requires docker compose v2.20+ for `--wait`.
 # Logs land in logs/integration_loop/<iteration> with per-step artifacts and a summary file.
 

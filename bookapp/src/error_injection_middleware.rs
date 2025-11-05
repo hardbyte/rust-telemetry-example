@@ -7,7 +7,6 @@ use matchit::Router as MatchRouter;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgPool};
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -16,7 +15,7 @@ use tokio::sync::RwLock;
 #[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
 pub struct ErrorInjectionConfig {
     id: i32,
-    /// The endpoint pattern to match (e.g., "/books/:id").
+    /// The endpoint pattern to match (e.g., "/books/{id}").
     endpoint_pattern: String,
     /// The HTTP method to match (e.g., "GET", "POST").
     http_method: String,
@@ -104,50 +103,6 @@ impl PostgresErrorInjectionConfigStore {
     pub fn new(pool: Arc<PgPool>) -> Self {
         Self { pool }
     }
-}
-
-fn normalize_endpoint_pattern(pattern: &str) -> Cow<'_, str> {
-    let needs_normalization = pattern.as_bytes().iter().any(|b| matches!(b, b':' | b'*'));
-    if !needs_normalization {
-        return Cow::Borrowed(pattern);
-    }
-
-    let mut normalized = String::with_capacity(pattern.len() + 4);
-    let trimmed = pattern.trim_start_matches('/');
-
-    if pattern.starts_with('/') {
-        normalized.push('/');
-    }
-
-    let mut first_segment = true;
-    for segment in trimmed.split('/') {
-        if !first_segment {
-            normalized.push('/');
-        }
-        first_segment = false;
-
-        if segment.is_empty() {
-            continue;
-        } else if segment.starts_with('{') {
-            normalized.push_str(segment);
-        } else if segment.starts_with(':') && segment.len() > 1 {
-            normalized.push('{');
-            normalized.push_str(&segment[1..]);
-            normalized.push('}');
-        } else if segment.starts_with('*') && segment.len() > 1 {
-            normalized.push_str("{*");
-            normalized.push_str(&segment[1..]);
-            normalized.push('}');
-        } else {
-            normalized.push_str(segment);
-        }
-    }
-
-    if pattern.ends_with('/') && !normalized.ends_with('/') {
-        normalized.push('/');
-    }
-
-    Cow::Owned(normalized)
 }
 
 #[async_trait]
@@ -384,6 +339,11 @@ pub async fn create_config(
     Extension(store): Extension<Arc<dyn ErrorInjectionConfigStore>>,
     Json(config): Json<ErrorInjectionConfigInput>,
 ) -> Result<Json<ErrorInjectionConfig>, StatusCode> {
+    if let Err(err) = validate_endpoint_pattern(&config.endpoint_pattern) {
+        tracing::warn!(?err, pattern = %config.endpoint_pattern, "Invalid error injection pattern");
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     let inserted_config = store
         .create_config(config)
         .await
@@ -408,6 +368,11 @@ pub async fn update_config(
     Path(id): Path<i32>,
     Json(config): Json<ErrorInjectionConfigInput>,
 ) -> Result<Json<ErrorInjectionConfig>, StatusCode> {
+    if let Err(err) = validate_endpoint_pattern(&config.endpoint_pattern) {
+        tracing::warn!(?err, pattern = %config.endpoint_pattern, id, "Invalid error injection pattern");
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     let updated_config = store
         .update_config(id, config)
         .await
@@ -596,23 +561,14 @@ async fn get_matching_error_injection_config(
     // Use matchit crate for path matching
     let mut router = MatchRouter::new();
     let mut patterns = Vec::with_capacity(configs.len());
-    let mut normalized_patterns = Vec::with_capacity(configs.len());
 
     for config in configs {
-        let normalized_pattern = normalize_endpoint_pattern(&config.endpoint_pattern);
-        // Add the endpoint_pattern to the router
-        tracing::debug!(
-            pattern = %config.endpoint_pattern,
-            normalized_pattern = %normalized_pattern,
-            "Registering latency pattern"
-        );
+        tracing::debug!(pattern = %config.endpoint_pattern, "Registering latency pattern");
         patterns.push(config.endpoint_pattern.clone());
-        normalized_patterns.push(normalized_pattern.to_string());
-        if let Err(err) = router.insert(normalized_pattern.as_ref(), config.clone()) {
+        if let Err(err) = router.insert(config.endpoint_pattern.as_str(), config.clone()) {
             tracing::warn!(
                 ?err,
                 pattern = %config.endpoint_pattern,
-                normalized_pattern = %normalized_pattern,
                 http_method = %method,
                 "Failed to register latency pattern"
             );
@@ -631,12 +587,16 @@ async fn get_matching_error_injection_config(
                 path = %path,
                 http_method = %method,
                 available_patterns = ?patterns,
-                available_normalized_patterns = ?normalized_patterns,
                 "Latency config lookup failed"
             );
             None
         }
     }
+}
+
+fn validate_endpoint_pattern(pattern: &str) -> Result<(), matchit::InsertError> {
+    let mut router = MatchRouter::<()>::new();
+    router.insert(pattern, ())
 }
 
 /// Creates a router for the error injection configuration service.
