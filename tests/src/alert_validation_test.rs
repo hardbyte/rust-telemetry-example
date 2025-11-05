@@ -1238,7 +1238,7 @@ async fn inject_latency(config: &AlertTestConfig, duration_secs: u64) -> TestRes
 
     // Step 1: Create latency injection configuration via error injection API
     let error_injection_config = serde_json::json!({
-        "endpoint_pattern": "/books/:id",
+        "endpoint_pattern": "/books/{id}",
         "http_method": "GET",
         "error_rate": 0.0,  // No errors, only latency
         "error_code": 500,
@@ -1292,13 +1292,13 @@ async fn inject_latency(config: &AlertTestConfig, duration_secs: u64) -> TestRes
     let mut request_count = 0;
 
     while SystemTime::now() < end_time {
-        // Make requests to /books/:id which matches our error injection pattern
+        // Make requests to /books/{id} which matches our error injection pattern
         // Make several requests in parallel to build up metrics faster
         let tasks: Vec<_> = (0..5)
             .map(|_| {
                 let client = bookapp_client.clone();
                 tokio::spawn(async move {
-                    // This request matches the pattern "/books/:id" and will have 600ms latency injected
+                    // This request matches the pattern "/books/{id}" and will have 600ms latency injected
                     let _ = client.get_book().id(1).send().await;
                 })
             })

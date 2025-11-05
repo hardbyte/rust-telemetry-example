@@ -61,7 +61,7 @@ Typical runtimes on a developer laptop:
 
 1. Create the short-lived rule `integration_latency_p95_test` with the expression  
    `histogram_quantile(0.95, sum(rate(traces_spanmetrics_latency_bucket{service="bookapp", span_kind="SPAN_KIND_SERVER"}[1m])) by (le))`.
-2. Post a latency config to the error-injection API (`/books/:id`, `latency_ms = 600`) and hammer the endpoint with concurrent requests for 120 s.
+2. Post a latency config to the error-injection API (`/books/{id}`, `latency_ms = 600`) and hammer the endpoint with concurrent requests for 120 s.
 3. Once Grafana marks the rule `active`, query Prometheus for the observed P95, remove the injection, and send recovery traffic.
 4. Wait (up to 3 minutes) for Grafana to move the rule out of `active`.
 
