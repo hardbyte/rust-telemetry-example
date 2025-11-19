@@ -4,3 +4,6 @@ target
 # run_tests logs
 .run_tests/
 .tools/
+/locust_env/*
+/requests/*
+
