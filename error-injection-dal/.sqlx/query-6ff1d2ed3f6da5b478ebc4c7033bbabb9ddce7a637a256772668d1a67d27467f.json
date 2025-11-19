@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                id,\n                endpoint_pattern,\n                http_method,\n                error_rate,\n                error_code,\n                error_message,\n                latency_ms\n            FROM error_injection.config\n            WHERE http_method = $1\n            ORDER BY endpoint_pattern\n            LIMIT 1000\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "endpoint_pattern",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "http_method",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "error_rate",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 4,
+        "name": "error_code",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "error_message",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "latency_ms",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "6ff1d2ed3f6da5b478ebc4c7033bbabb9ddce7a637a256772668d1a67d27467f"
+}
