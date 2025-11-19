@@ -14,6 +14,7 @@ This is a Cargo workspace with the following crates:
 
 - **`bookapp`**: Main REST API service (port 8000) - handles HTTP requests, produces Kafka messages
 - **`bookapp-dal`**: Data access layer with repository pattern, SQLx integration, and compile-time query verification
+- **`error-injection-dal`**: Dedicated DAL + migrations for the error injection middleware (owns the `error_injection` schema)
 - **`backend`**: Async message processor and background task scheduler - consumes Kafka messages, runs scheduled jobs, includes outbox publisher (console-subscriber on 6670)
 - **`data-loader`**: Bulk data loading utility using the Progenitor client - demonstrates cross-service tracing for batch operations
 - **`client`**: Generated API client using Progenitor for type-safe service-to-service calls with automatic tracing integration
@@ -427,23 +428,95 @@ The data-loader provides full telemetry integration:
 
 Use Grafana to observe data-loader operations across the full application stack and verify cross-service trace propagation.
 
+### Importing the Huey dataset (hacky loader)
+
+Need a richer catalog for stress tests? A simple helper script replays the sanitized Huey Books dump
+directly into the running API by calling `POST /books/add` for each work:
+
+```bash
+docker compose up -d --wait
+
+python scripts/import_realdata.py \
+  --dump-path /home/brian/data/huey-books-scrubed-postgres_localhost-2024_07_13_18_14_43-dump.sql \
+  --app-url "http://127.0.0.1:8000" \
+  --max-books 1000
+```
+
+Use `--skip`/`--max-books` to target a subset and `--dry-run` to verify parsing without modifying your
+database. The script is intentionally hacky but good enough to seed tens of thousands of works for
+telemetry/load experiments.
+
 ## Load Testing
 
+The provided Locust script is instrumented with OpenTelemetry and tuned for high throughput by default. Wait-times can be
+overridden via `LOCUST_MIN_WAIT` / `LOCUST_MAX_WAIT` (seconds) and the in-memory ID pool via `LOCUST_MIN_ID_POOL`.
 
-The provided Locust script is also instrumented with OpenTelemetry.
+```bash
+# Discover dynamic ports
+APP_PORT=$(docker compose port app 8000 | cut -d: -f2)
+OTLP_PORT=$(docker compose port telemetry 4317 | cut -d: -f2)
 
-```shell
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 \
-LOCUST_HOST=http://localhost:8000 \
+# Drive ~800 req/s (observed on a 10‑core laptop) with OTEL traces for the load generator
+LOCUST_MIN_WAIT=0.0 \
+LOCUST_MAX_WAIT=0.01 \
+OTEL_SERVICE_NAME="locust-fast" \
+OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:${OTLP_PORT}" \
 uvx \
-  --with 'opentelemetry-sdk' \
-  --with "opentelemetry-exporter-otlp-proto-grpc >=1.24.0" \
+  --with "opentelemetry-sdk" \
+  --with "opentelemetry-exporter-otlp-proto-grpc>=1.24.0" \
   --with "opentelemetry-instrumentation-requests==0.46b0" \
   --with "opentelemetry-instrumentation-urllib3==0.46b0" \
   --with "locust" \
-  locust -f requests/locustfile.py --headless -u 50 -r 5 -t 1m --stop-timeout 5 --loglevel INFO
+  locust -f requests/locustfile.py \
+    --headless \
+    --host "http://127.0.0.1:${APP_PORT}" \
+    --csv "locust_metrics_$(date +%Y%m%d_%H%M%S)" \
+    --loglevel INFO \
+    --stop-timeout 5 \
+    -u 400 \
+    -r 100 \
+    -t 2m
 ```
 
+Raising `-u` (users) and tightening `LOCUST_MAX_WAIT` can push the workload into the thousands of requests per second—
+just ensure your workstation and Docker limits can sustain the additional CPU/network load.
+
+`LOCUST_BOOK_CACHE_TTL` (seconds, default `2`) controls how aggressively virtual users refresh the global `/books`
+inventory snapshot. Increasing it reduces the initial ID-fetch storm and keeps the database connection pool available for
+real traffic.
+`LOCUST_BOOK_PAGE_LIMIT` (default `25`, always at least `LOCUST_MIN_ID_POOL`) caps how many IDs each refresh pulls from `/books`. Tune it based on the size of
+your catalog and desired ID pool size—smaller values reduce the load on PostgreSQL even further.
+
+### Books API Paging
+
+`GET /books` now accepts `limit` (default 100, max 500) and `offset` query parameters. Responses continue to return a JSON
+array, but each request also emits `x-pagination-limit`, `x-pagination-offset`, and `x-pagination-next-offset` headers so
+clients can iterate through the catalog without downloading the entire table. Always request only as many rows as you need
+and advance `offset` using the header values to keep PostgreSQL latency low. If you only need identifiers (e.g., for load
+testing), call `GET /books/id_list` with the same parameters to receive a lightweight array of UUIDs and the same pagination
+metadata in the response headers.
+
+### Search Endpoint Guardrails
+
+- `GET /books/search` now clamps page sizes to 50 rows. Single-letter queries (e.g., `q=A`) are capped at 10 rows because they
+  tend to drive the heaviest load during alphabetic browsing.
+- Alphabetic searches are cached for ~5 seconds inside the API process, keeping the Postgres pool free for more selective
+  queries while still providing snappy UX for list-style discovery flows.
+
+### Database Pool Tuning
+
+`bookapp` now reads pool settings from environment variables so you can scale connection counts without recompiling:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `DATABASE_POOL_MAX_CONNECTIONS` | `100` | Upper bound of the SQLx pool (set to `48` in Docker Compose) |
+| `DATABASE_POOL_MIN_CONNECTIONS` | `20` | Minimum warm connections maintained in the pool (set to `12` in Docker Compose) |
+| `DATABASE_POOL_ACQUIRE_TIMEOUT_MS` | `1000` | How long to wait for a free connection before failing the request |
+| `DATABASE_POOL_IDLE_TIMEOUT_SECS` | `30` | When idle connections may be recycled |
+| `DATABASE_POOL_MAX_LIFETIME_SECS` | `600` | Maximum lifetime before SQLx forcibly refreshes a connection |
+
+The Postgres container is started with `max_connections=300` so the larger pools can sustain high-concurrency load tests
+without timing out.
 
 ![img.png](./.github/locust-screenshot.png)
 
@@ -455,7 +528,7 @@ The `bookapp-dal` crate implements a clean separation between business logic and
 
 ### Architecture & Design
 
-- **Repository Pattern**: Async traits (`AuthorRepository`, `WorkRepository`, etc.) for testability and abstraction
+- **Repository Pattern**: Concrete repository structs (e.g., `AuthorRepositoryImpl`, `WorkRepositoryImpl`) with executor-aware helpers for transactions
 - **Read/Write Pool Separation**: Supports dedicated read replicas and write masters with automatic pool selection
 - **Dependency Injection**: Database pools injected from application layer, enabling multiple domain-specific DALs
 - **Domain-Driven Design**: Separate repositories for each aggregate root (Author, Work, Edition, Series)
@@ -464,7 +537,7 @@ The `bookapp-dal` crate implements a clean separation between business logic and
 ### Core Features
 
 #### Type Safety & Verification
-- **Compile-time SQL Verification**: SQLx macros with prepared query metadata (`.sqlx/` directory)
+- **Compile-time SQL Verification**: SQLx macros with prepared query metadata (`bookapp-dal/.sqlx/` and `error-injection-dal/.sqlx/` directories)
 - **Strong Typing**: Custom types for IDs, enums, and domain objects
 - **Null Safety**: Proper Option<T> handling for nullable database columns
 
@@ -485,39 +558,33 @@ The `bookapp-dal` crate implements a clean separation between business logic and
 
 #### Basic CRUD Operations
 ```rust
-use bookapp_dal::{AuthorRepository, AuthorRepositoryImpl, AuthorCreateInput};
+use bookapp_dal::models::AuthorCreateInput;
+use bookapp_dal::repository::AuthorRepositoryImpl;
 
-// Initialize repository with pool separation
 let repo = AuthorRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
 
-// Create author (write pool)
-let author = AuthorCreateInput {
-    name: "Brandon Sanderson".to_string(),
-    sort_name: "Sanderson, Brandon".to_string(),
-};
-let author_id = repo.create(author).await?;
+let author_id = repo
+    .create(AuthorCreateInput {
+        name: "Brandon Sanderson".to_string(),
+        sort_name: "Sanderson, Brandon".to_string(),
+    })
+    .await?;
 
-// Find by ID (read pool)
 let author = repo.find_by_id(author_id).await?;
-
-// Search with patterns (read pool)
-let authors = repo.find_by_name_pattern("Sanderson").await?;
+let top_authors = repo.find_all().await?;
 ```
 
 #### Advanced Filtering
 ```rust
-use bookapp_dal::{WorkRepository, WorkFilterParams};
+use bookapp_dal::models::BookFilterParams;
+use bookapp_dal::repository::BookRepositoryImpl;
 
-let repo = WorkRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
+let repo = BookRepositoryImpl::new(db_pools.write_pool.clone(), db_pools.read_pool.clone());
 
-// Complex filtering with multiple criteria
-let params = WorkFilterParams {
-    title_pattern: Some("Foundation".to_string()),
-    author_name_pattern: Some("Asimov".to_string()),
-    language: Some("en".to_string()),
-    publication_year_min: Some(1950),
-    publication_year_max: Some(1960),
-    limit: Some(10),
+let params = BookFilterParams {
+    primary_author_pattern: Some("Asimov".to_string()),
+    work_title_pattern: Some("Foundation".to_string()),
+    limit: Some(25),
     offset: Some(0),
 };
 let works = repo.find_by_filters(params).await?;
@@ -525,7 +592,7 @@ let works = repo.find_by_filters(params).await?;
 
 #### Transaction Management
 ```rust
-use bookapp_dal::{DatabasePools, WorkCreateInput, EditionCreateInput};
+use bookapp_dal::{DatabasePools, EditionCreateInput, WorkCreateInput};
 
 // Begin explicit transaction
 let mut tx = db_pools.write_pool.begin().await?;
@@ -536,7 +603,7 @@ let work_input = WorkCreateInput {
     original_language: "en".to_string(),
     publication_year: Some(2011),
 };
-let work_id = work_repo.create_with_tx(&mut tx, work_input).await?;
+let work_id = work_repo.create_with(&mut tx, work_input).await?;
 
 // Create edition within same transaction
 let edition_input = EditionCreateInput {
@@ -544,7 +611,7 @@ let edition_input = EditionCreateInput {
     title: "The Martian".to_string(),
     isbn: Some("9780553418026".to_string()),
 };
-let edition_id = edition_repo.create_with_tx(&mut tx, edition_input).await?;
+let edition_id = edition_repo.create_with(&mut tx, edition_input).await?;
 
 // Commit transaction
 tx.commit().await?;
@@ -572,6 +639,16 @@ let db_pools = DatabasePools::new(
 ).await?;
 ```
 
+### Error Injection DAL
+
+Latency/error simulation endpoints use a dedicated crate, `error-injection-dal`, which owns the `error_injection` PostgreSQL schema. Its responsibilities:
+
+- Provisioning the `error_injection.config` table and associated indexes via its own migrations
+- Exposing `ErrorInjectionRepository` with executor-aware helpers so the API can read/write configs using shared pools
+- Maintaining compile-time checked SQL (`error-injection-dal/.sqlx/`) independent from the primary catalog DAL
+
+When preparing metadata or running migrations for this crate, point `DATABASE_URL` at the same database but add `?options=--search_path%3Derror_injection` so SQLx stores its `_sqlx_migrations` ledger inside the dedicated schema.
+
 ### Error Handling
 
 The DAL provides comprehensive error handling with specific error types:
@@ -580,38 +657,16 @@ The DAL provides comprehensive error handling with specific error types:
 use bookapp_dal::DalError;
 
 match repo.find_by_id(id).await {
-    Ok(Some(entity)) => // Found
-    Ok(None) => // Not found (not an error)
-    Err(DalError::DatabaseConnection(_)) => // Connection issues
-    Err(DalError::QueryFailed(_)) => // SQL execution failed
-    Err(DalError::InvalidInput(_)) => // Validation error
-    Err(DalError::TransactionFailed(_)) => // Transaction rollback
-}
-```
-
-### Testing Support
-
-The repository pattern enables easy mocking for unit tests:
-
-```rust
-#[cfg(test)]
-mod tests {
-    use mockall::predicate::*;
-    use bookapp_dal::MockAuthorRepository;
-
-    #[tokio::test]
-    async fn test_author_service() {
-        let mut mock_repo = MockAuthorRepository::new();
-        mock_repo
-            .expect_find_by_id()
-            .with(eq(1))
-            .times(1)
-            .returning(|_| Ok(Some(author_fixture())));
-        
-        let service = AuthorService::new(Box::new(mock_repo));
-        let author = service.get_author(1).await.unwrap();
-        assert_eq!(author.name, "Test Author");
+    Ok(Some(entity)) => println!("Found {:?}", entity),
+    Ok(None) => println!("Entity missing"),
+    Err(DalError::BookNotFound { .. }) => println!("Not found"),
+    Err(DalError::AlreadyExists { table, constraint }) => {
+        tracing::warn!(%table, %constraint, "duplicate insert");
     }
+    Err(DalError::ForeignKeyViolation { constraint }) => {
+        tracing::error!(%constraint, "referential integrity violation");
+    }
+    Err(other) => return Err(other.into()),
 }
 ```
 
@@ -674,13 +729,21 @@ The normalized schema supports:
 After modifying database queries, update the prepared query metadata:
 
 ```shell
+# Book/catalog data layer
 cd bookapp-dal
 export DATABASE_URL="postgres://postgres:password@$(docker compose port db 5432)/bookapp"
-
+sqlx migrate run
 cargo sqlx prepare
 
-# Commit the updated .sqlx/ directory
-git add .sqlx && git commit -m "Update SQLx query metadata"
+# Error injection / latency testing DAL (separate schema + migration history)
+cd ../error-injection-dal
+export ERROR_INJECTION_DATABASE_URL="${DATABASE_URL}?options=--search_path%3Derror_injection"
+DATABASE_URL="$ERROR_INJECTION_DATABASE_URL" sqlx migrate run
+DATABASE_URL="$ERROR_INJECTION_DATABASE_URL" cargo sqlx prepare
+
+# Commit the updated directories from the repo root
+cd ..
+git add bookapp-dal/.sqlx error-injection-dal/.sqlx && git commit -m "Update SQLx query metadata"
 ```
 
 
@@ -690,7 +753,7 @@ git add .sqlx && git commit -m "Update SQLx query metadata"
 
 Use `./run_tests.sh` for a full lint + test + integration pass. The harness now:
 
-- Applies database migrations and refreshes SQLx metadata automatically.
+- Applies catalog + error-injection migrations and refreshes both SQLx metadata caches automatically (each wrapped in its own timeout).
 - Binds each stage (migrations, linting, service bring-up, integration tests) to a dedicated timeout so any hang is detected quickly and the failing step is reported.
 - Streams output to STDOUT **and** saves a timestamped log in `.run_tests/run_tests_YYYYmmdd_HHMMSS.log`.
 - Tears down compose services on exit (even on failure).
@@ -722,7 +785,7 @@ RUN_TESTS_OTEL_DEBUG=1 RUN_TESTS_OTEL_ENDPOINT=auto ./run_tests.sh
 RUN_TESTS_KEEP_STACK=1 ./run_tests.sh
 ```
 
-The script exports `SQLX_OFFLINE=true` so compile-time query checks use the cached metadata under `.sqlx/`. If new queries are added the harness will regenerate the metadata; commit the updated directory alongside your change.
+The script exports `SQLX_OFFLINE=true` so compile-time query checks use the cached metadata under `bookapp-dal/.sqlx/` and `error-injection-dal/.sqlx/`. If new queries are added the harness will regenerate the metadata; commit the updated directories alongside your change.
 
 ### Manual unit tests
 

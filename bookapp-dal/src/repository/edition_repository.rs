@@ -1,10 +1,9 @@
 use crate::error::{DalError, Result};
 use crate::models::{Edition, EditionCreateInput};
-use crate::repository::traits::EditionRepository;
-use async_trait::async_trait;
 use sqlx::{Executor, PgPool, Postgres};
 use std::sync::Arc;
 use tracing::{debug, instrument};
+use uuid::Uuid;
 
 pub struct EditionRepositoryImpl {
     write_pool: Arc<PgPool>,
@@ -35,7 +34,7 @@ impl EditionRepositoryImpl {
         skip_all,
         fields(work.id = %input.work_id, edition.isbn = %input.isbn)
     )]
-    pub async fn create_with<'e, E>(&self, exec: E, input: EditionCreateInput) -> Result<i32>
+    pub async fn create_with<'e, E>(&self, exec: E, input: EditionCreateInput) -> Result<Uuid>
     where
         E: Executor<'e, Database = Postgres>,
     {
@@ -63,7 +62,7 @@ impl EditionRepositoryImpl {
     }
 
     #[instrument(name = "find_edition_by_id_with", skip_all, fields(edition.id = %id))]
-    pub async fn find_by_id_with<'e, E>(&self, exec: E, id: i32) -> Result<Option<Edition>>
+    pub async fn find_by_id_with<'e, E>(&self, exec: E, id: Uuid) -> Result<Option<Edition>>
     where
         E: Executor<'e, Database = Postgres>,
     {
@@ -125,7 +124,7 @@ impl EditionRepositoryImpl {
     }
 
     #[instrument(name = "list_editions_by_work_with", skip_all, fields(work.id = %work_id))]
-    pub async fn list_by_work_with<'e, E>(&self, exec: E, work_id: i32) -> Result<Vec<Edition>>
+    pub async fn list_by_work_with<'e, E>(&self, exec: E, work_id: Uuid) -> Result<Vec<Edition>>
     where
         E: Executor<'e, Database = Postgres>,
     {
@@ -158,7 +157,7 @@ impl EditionRepositoryImpl {
     }
 
     #[instrument(name = "delete_edition_with", skip_all, fields(edition.id = %id))]
-    pub async fn delete_with<'e, E>(&self, exec: E, id: i32) -> Result<()>
+    pub async fn delete_with<'e, E>(&self, exec: E, id: Uuid) -> Result<()>
     where
         E: Executor<'e, Database = Postgres>,
     {
@@ -180,144 +179,25 @@ impl EditionRepositoryImpl {
 
         Ok(())
     }
-}
 
-#[async_trait]
-impl EditionRepository for EditionRepositoryImpl {
-    #[instrument(
-        name = "create_edition",
-        skip(self, input),
-        fields(work.id = %input.work_id, edition.isbn = %input.isbn)
-    )]
-    async fn create(&self, input: EditionCreateInput) -> Result<i32> {
-        let row = sqlx::query!(
-            r#"
-            INSERT INTO editions
-                (work_id, isbn, title, publisher, publication_date, "language", page_count, format)
-            VALUES
-                ($1,      $2,   $3,    $4,        $5,               $6,        $7,         $8)
-            RETURNING id
-            "#,
-            input.work_id,
-            input.isbn,
-            input.title,
-            input.publisher,
-            input.publication_date,
-            input.language,
-            input.page_count,
-            input.format
-        )
-        .fetch_one(self.write_pool.as_ref())
-        .await?;
-
-        Ok(row.id)
+    pub async fn create(&self, input: EditionCreateInput) -> Result<Uuid> {
+        self.create_with(&*self.write_pool, input).await
     }
 
-    #[instrument(name = "find_edition_by_id", skip(self), fields(edition.id = %id))]
-    async fn find_by_id(&self, id: i32) -> Result<Option<Edition>> {
-        let edition = sqlx::query_as!(
-            Edition,
-            r#"
-            SELECT
-                id,
-                work_id,
-                isbn,
-                title,
-                publisher,
-                publication_date,
-                "language",
-                page_count,
-                format,
-                created_at,
-                updated_at
-            FROM editions
-            WHERE id = $1
-            "#,
-            id
-        )
-        .fetch_optional(self.read_pool.as_ref())
-        .await?;
-
-        Ok(edition)
+    pub async fn find_by_id(&self, id: Uuid) -> Result<Option<Edition>> {
+        self.find_by_id_with(&*self.read_pool, id).await
     }
 
-    #[instrument(name = "find_edition_by_isbn", skip(self), fields(edition.isbn = %isbn))]
-    async fn find_by_isbn(&self, isbn: &str) -> Result<Option<Edition>> {
-        let edition = sqlx::query_as!(
-            Edition,
-            r#"
-            SELECT
-                id,
-                work_id,
-                isbn,
-                title,
-                publisher,
-                publication_date,
-                "language",
-                page_count,
-                format,
-                created_at,
-                updated_at
-            FROM editions
-            WHERE isbn = $1
-            "#,
-            isbn
-        )
-        .fetch_optional(self.read_pool.as_ref())
-        .await?;
-
-        Ok(edition)
+    pub async fn find_by_isbn(&self, isbn: &str) -> Result<Option<Edition>> {
+        self.find_by_isbn_with(&*self.read_pool, isbn).await
     }
 
-    #[instrument(name = "list_editions_by_work", skip(self), fields(work.id = %work_id))]
-    async fn list_by_work(&self, work_id: i32) -> Result<Vec<Edition>> {
-        debug!("Listing editions for work_id={}", work_id);
-        let rows = sqlx::query_as!(
-            Edition,
-            r#"
-            SELECT
-                id,
-                work_id,
-                isbn,
-                title,
-                publisher,
-                publication_date,
-                "language",
-                page_count,
-                format,
-                created_at,
-                updated_at
-            FROM editions
-            WHERE work_id = $1
-            ORDER BY publication_date NULLS LAST, id
-            "#,
-            work_id
-        )
-        .fetch_all(self.read_pool.as_ref())
-        .await?;
-
-        Ok(rows)
+    pub async fn list_by_work(&self, work_id: Uuid) -> Result<Vec<Edition>> {
+        self.list_by_work_with(&*self.read_pool, work_id).await
     }
 
-    #[instrument(name = "delete_edition", skip(self), fields(edition.id = %id))]
-    async fn delete(&self, id: i32) -> Result<()> {
-        let result = sqlx::query!(
-            r#"
-            DELETE FROM editions
-            WHERE id = $1
-            "#,
-            id
-        )
-        .execute(self.write_pool.as_ref())
-        .await?;
-
-        if result.rows_affected() == 0 {
-            return Err(DalError::InvalidInput {
-                message: format!("Edition not found: {id}"),
-            });
-        }
-
-        Ok(())
+    pub async fn delete(&self, id: Uuid) -> Result<()> {
+        self.delete_with(&*self.write_pool, id).await
     }
 }
 
@@ -326,7 +206,7 @@ mod tests {
     use super::*;
     use sqlx::PgPool;
 
-    async fn insert_work(pool: &PgPool, title: &str) -> i32 {
+    async fn insert_work(pool: &PgPool, title: &str) -> Uuid {
         let row = sqlx::query!(
             r#"
             INSERT INTO works (title)
@@ -360,7 +240,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(id > 0);
+        assert!(!id.is_nil());
 
         let found = repo.find_by_id(id).await.unwrap();
         assert!(found.is_some());
@@ -465,7 +345,7 @@ mod tests {
     #[sqlx::test]
     async fn test_delete_nonexistent_edition(pool: PgPool) {
         let repo = EditionRepositoryImpl::single_pool(Arc::new(pool));
-        let res = repo.delete(9_999_999).await;
+        let res = repo.delete(Uuid::nil()).await;
         assert!(res.is_err());
     }
 }

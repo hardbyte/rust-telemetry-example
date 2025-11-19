@@ -1,11 +1,12 @@
 use anyhow::Result;
-use bookapp_dal::{BookFilterParams, BookRepository, BookRepositoryImpl, BookStatus};
+use bookapp_dal::{BookFilterParams, BookRepositoryImpl, BookStatus};
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::KeyValue;
+use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::watch;
 use tokio_cron_scheduler::{Job, JobScheduler};
-use tracing::{error, info, instrument};
+use tracing::{error, info, instrument, Instrument};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::book_enrichment::BookEnrichmentService;
@@ -159,7 +160,7 @@ pub async fn start_scheduler_with_shutdown(
             let startup_span_context = startup_span_context.clone();
             Box::pin(async move {
                 let span = tracing::info_span!(
-                    "job execution",
+                    "search_view_refresh",
                     job.name = "search_view_refresh",
                     job.schedule = "0 */15 * * * *",
                     job.type = "periodic",
@@ -226,6 +227,25 @@ pub async fn start_scheduler_with_shutdown(
     scheduler.add(stats_job).await?;
     scheduler.add(cleanup_job).await?;
     scheduler.add(search_view_refresh_job).await?;
+
+    // Kick off key jobs immediately so telemetry tests can observe them without
+    // waiting for the cron schedule.
+    {
+        let repo = book_repository.clone();
+        spawn_startup_job("generate_daily_statistics", "startup", async move {
+            generate_daily_statistics(repo).await
+        });
+    }
+    {
+        let repo = book_repository.clone();
+        let search_refresher = search_refresher.clone();
+        spawn_startup_job("refresh_search_materialized_view", "startup", async move {
+            search_refresher
+                .force_refresh_for_schedule(repo.clone())
+                .await?;
+            refresh_search_materialized_view(repo).await
+        });
+    }
 
     // Start the scheduler
     scheduler.start().await?;
@@ -368,6 +388,62 @@ async fn refresh_search_materialized_view(book_repository: Arc<BookRepositoryImp
     );
 
     Ok(())
+}
+
+fn spawn_startup_job<Fut>(job_name: &'static str, schedule: &'static str, future: Fut)
+where
+    Fut: Future<Output = Result<()>> + Send + 'static,
+{
+    tokio::spawn(async move {
+        let span = match job_name {
+            "generate_daily_statistics" => tracing::info_span!(
+                "generate_daily_statistics",
+                job.schedule = schedule,
+                job.type = "startup"
+            ),
+            "refresh_search_materialized_view" => tracing::info_span!(
+                "refresh_search_materialized_view",
+                job.schedule = schedule,
+                job.type = "startup"
+            ),
+            _ => tracing::info_span!(
+                "startup_job",
+                job.name = job_name,
+                job.schedule = schedule,
+                job.type = "startup"
+            ),
+        };
+
+        async move {
+            let start_time = std::time::Instant::now();
+            info!(
+                job.name = job_name,
+                job.schedule = schedule,
+                "Starting startup-triggered job"
+            );
+            match future.await {
+                Ok(()) => {
+                    info!(
+                        job.name = job_name,
+                        job.schedule = schedule,
+                        duration_ms = start_time.elapsed().as_millis(),
+                        "Startup job completed successfully"
+                    );
+                }
+                Err(e) => {
+                    error!(
+                        job.name = job_name,
+                        job.schedule = schedule,
+                        duration_ms = start_time.elapsed().as_millis(),
+                        error = %e,
+                        "Startup job failed"
+                    );
+                }
+            }
+        }
+        .instrument(span)
+        .await;
+    });
 }
 
 #[cfg(test)]

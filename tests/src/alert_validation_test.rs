@@ -1,12 +1,14 @@
+use futures::StreamExt;
 use reqwest::Client as HttpClient;
 use serde::Deserialize;
 use serde_json::json;
 use std::collections::HashMap;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::time::{sleep, timeout};
+use uuid::Uuid;
 
 // Import the generated Progenitor client for API calls
-use client::{Client as BookappClient, ClientState};
+use client::{types::BookCreateIn, Client as BookappClient, ClientState};
 
 // Configuration constants
 const APP_BASE_URL: &str = "http://localhost:8000";
@@ -946,9 +948,11 @@ async fn test_latency_p95_alert() -> TestResult<()> {
         // Send a short burst of healthy requests so the latency histogram reflects normal traffic.
         let cooldown_client =
             BookappClient::new(&config_for_test.app_base_url, ClientState::default());
+        let cooldown_book_id =
+            create_sample_book(&cooldown_client, "latency-cooldown").await?;
         for _ in 0..20 {
             let client = cooldown_client.clone();
-            let _ = client.get_book().id(1).send().await;
+            let _ = client.get_book().id(cooldown_book_id).send().await;
             sleep(Duration::from_millis(100)).await;
         }
 
@@ -1211,7 +1215,7 @@ async fn inject_errors(config: &AlertTestConfig, duration_secs: u64) -> TestResu
 
     while SystemTime::now() < end_time {
         // Make requests that will trigger errors (e.g., invalid book IDs)
-        for invalid_id in [99999, -1, 0] {
+        for invalid_id in [Uuid::nil(), Uuid::from_u128(u128::MAX), Uuid::now_v7()] {
             let _ = bookapp_client.get_book().id(invalid_id).send().await; // This should return 404/500 errors
             request_count += 1;
         }
@@ -1235,6 +1239,7 @@ async fn inject_latency(config: &AlertTestConfig, duration_secs: u64) -> TestRes
     let http_client = HttpClient::new();
     let client_state = ClientState::default();
     let bookapp_client = BookappClient::new(&config.app_base_url, client_state);
+    let healthy_book_id = create_sample_book(&bookapp_client, "latency-health").await?;
 
     // Step 1: Create latency injection configuration via error injection API
     let error_injection_config = serde_json::json!({
@@ -1297,9 +1302,10 @@ async fn inject_latency(config: &AlertTestConfig, duration_secs: u64) -> TestRes
         let tasks: Vec<_> = (0..5)
             .map(|_| {
                 let client = bookapp_client.clone();
+                let target_id = healthy_book_id;
                 tokio::spawn(async move {
                     // This request matches the pattern "/books/{id}" and will have 600ms latency injected
-                    let _ = client.get_book().id(1).send().await;
+                    let _ = client.get_book().id(target_id).send().await;
                 })
             })
             .collect();
@@ -1342,6 +1348,41 @@ async fn inject_latency(config: &AlertTestConfig, duration_secs: u64) -> TestRes
     }
 
     Ok(())
+}
+
+async fn create_sample_book(client: &BookappClient, label: &str) -> TestResult<Uuid> {
+    let payload = BookCreateIn {
+        work_title: format!("{} {}", label, Uuid::now_v7()),
+        primary_author_name: Some("Alert Validation Bot".to_string()),
+        primary_author_id: None,
+        status: None,
+    };
+
+    let response = client
+        .create_book()
+        .body(payload)
+        .send()
+        .await
+        .map_err(|e| AlertTestError::new("create_sample_book", e.to_string()))?;
+
+    if !response.status().is_success() {
+        return Err(AlertTestError::new(
+            "create_sample_book",
+            format!("Unexpected status {}", response.status()),
+        ));
+    }
+
+    let mut stream = response.into_inner();
+    let mut bytes = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| AlertTestError::new("create_sample_book", e.to_string()))?;
+        bytes.extend_from_slice(&chunk);
+    }
+
+    let body = String::from_utf8(bytes)
+        .map_err(|e| AlertTestError::new("create_sample_book", e.to_string()))?;
+    serde_json::from_str(body.trim())
+        .map_err(|e| AlertTestError::new("create_sample_book", e.to_string()))
 }
 
 async fn verify_error_ratio_threshold(

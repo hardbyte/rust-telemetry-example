@@ -8,7 +8,7 @@ members = [
     "observability-utils",
     "tests",
     "tokio-otel-metrics",
-    "data-loader",
+    "data-loader", "error-injection-dal",
 ]
 
 [workspace.dependencies]
@@ -18,3 +18,7 @@ reqwest = "0.12.22"
 opentelemetry = "0.30.0"
 tracing = { version = "0.1.41" }
 tracing-opentelemetry = { version = "0.31.0" }
+uuid = { version = "1.10.0", features = ["serde", "v7"] }
+
+[patch.crates-io]
+regress = { path = "vendor/regress-0.10.4" }

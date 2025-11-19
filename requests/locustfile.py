@@ -29,6 +29,28 @@ import os
 import json
 import string
 import random
+import threading
+import time
+
+
+def _configured_wait_time():
+    """Read wait-time bounds from env to allow high-throughput runs."""
+    min_wait = float(os.environ.get("LOCUST_MIN_WAIT", "0.0"))
+    max_wait = float(os.environ.get("LOCUST_MAX_WAIT", "0.05"))
+    if max_wait < min_wait:
+        max_wait = min_wait
+    return between(min_wait, max_wait)
+
+
+WAIT_TIME_STRATEGY = _configured_wait_time()
+BOOK_CACHE_LOCK = threading.Lock()
+BOOK_CACHE_REFRESH_LOCK = threading.Lock()
+BOOK_CACHE = {
+    "ids": [],
+    "last_refresh": 0.0,
+}
+BOOK_CACHE_TTL = float(os.environ.get("LOCUST_BOOK_CACHE_TTL", "2.0"))
+BOOK_PAGE_LIMIT = int(os.environ.get("LOCUST_BOOK_PAGE_LIMIT", "25"))
 
 def init_telemetry(
         service_name: str = "load-tester-client"
@@ -73,16 +95,128 @@ except Exception as e:
     print(f"Failed to initialize telemetry: {e}")
 
 class BookTasks(TaskSet):
+    MIN_ID_POOL_SIZE = int(os.environ.get("LOCUST_MIN_ID_POOL", "25"))
 
     def on_start(self) -> None:
         self.created_book_ids = []
+        self.refresh_book_ids()
+
+    def _evict_book_id(self, book_id: str) -> None:
+        """Remove IDs that were deleted by other concurrent users."""
+        try:
+            self.created_book_ids.remove(book_id)
+        except ValueError:
+            pass
+        with BOOK_CACHE_LOCK:
+            try:
+                BOOK_CACHE["ids"].remove(book_id)
+            except ValueError:
+                pass
+
+    def _ensure_inventory(self):
+        min_pool = self.MIN_ID_POOL_SIZE
+        if len(self.created_book_ids) < min_pool:
+            self.refresh_book_ids()
+
+    def _hydrate_from_cache(self) -> bool:
+        """Copy cached IDs into the current user if they are still fresh."""
+        with BOOK_CACHE_LOCK:
+            age = time.monotonic() - BOOK_CACHE["last_refresh"]
+            if BOOK_CACHE["ids"] and age <= BOOK_CACHE_TTL:
+                self.created_book_ids = BOOK_CACHE["ids"].copy()
+                return True
+        return False
+
+    def _update_cache(self, ids):
+        with BOOK_CACHE_LOCK:
+            BOOK_CACHE["ids"] = ids.copy()
+            BOOK_CACHE["last_refresh"] = time.monotonic()
+
+    def _append_new_ids(self, ids):
+        if not ids:
+            return
+        self.created_book_ids.extend(ids)
+        with BOOK_CACHE_LOCK:
+            seen = set(BOOK_CACHE["ids"])
+            for value in ids:
+                if value not in seen:
+                    BOOK_CACHE["ids"].append(value)
+                    seen.add(value)
+
+    def refresh_book_ids(self, force: bool = False):
+        if not force and self._hydrate_from_cache():
+            return
+
+        with BOOK_CACHE_REFRESH_LOCK:
+            if not force and self._hydrate_from_cache():
+                return
+
+            aggregated_ids = []
+            seen = set()
+            offset = 0
+            page_limit = max(self.MIN_ID_POOL_SIZE, BOOK_PAGE_LIMIT)
+
+            while len(aggregated_ids) < self.MIN_ID_POOL_SIZE:
+                params = {
+                    "limit": page_limit,
+                    "offset": offset,
+                }
+                with self.client.get(
+                    "/books/id_list",
+                    params=params,
+                    headers={"Accept": "application/json"},
+                    catch_response=True,
+                ) as response:
+                    if response.status_code == 200:
+                        try:
+                            books = response.json()
+                            if isinstance(books, list):
+                                unique_ids = [
+                                    book if isinstance(book, str) else book.get("id")
+                                    for book in books
+                                    if (
+                                        (isinstance(book, str) and book)
+                                        or (isinstance(book, dict) and book.get("id"))
+                                    )
+                                ]
+                                deduped = []
+                                for book_id in unique_ids:
+                                    if book_id not in seen:
+                                        seen.add(book_id)
+                                        deduped.append(book_id)
+                                aggregated_ids.extend(deduped)
+                                response.success()
+
+                                if len(books) < page_limit:
+                                    break
+
+                                offset += page_limit
+                                continue
+                            response.failure("Books response is not a list")
+                            break
+                        except Exception as exc:
+                            response.failure(f"Failed to decode books response JSON: {exc}")
+                            break
+                    else:
+                        response.failure(f"Failed to refresh books ({response.status_code})")
+                        break
+
+            if aggregated_ids:
+                self._update_cache(aggregated_ids)
+                self.created_book_ids = aggregated_ids.copy()
+                return
+
+        # Attempt to fall back to cache if the live refresh failed
+        if not self.created_book_ids:
+            self._hydrate_from_cache()
 
 
     @task(100)
     def get_book(self):
-        # Randomly select a book ID
-        book_id = random.randint(1, 90)
-        # Define the endpoint URL
+        self._ensure_inventory()
+        if not self.created_book_ids:
+            return
+        book_id = random.choice(self.created_book_ids)
         url = f"/books/{book_id}"
         
         # Create a named span for better tracing
@@ -96,18 +230,29 @@ class BookTasks(TaskSet):
                 # Make the GET request with the Accept header
                 with self.client.get(url, headers={"Accept": "application/json"}, catch_response=True) as response:
                     span.set_attribute("http.status_code", response.status_code)
-                    if response.status_code != 200:
-                        span.set_attribute("error", True)
-                        response.failure(f"Failed to retrieve book with ID {book_id}")
-                    else:
+                    if response.status_code == 200:
                         response.success()
+                    elif response.status_code == 404:
+                        span.set_attribute("book.missing", True)
+                        self._evict_book_id(book_id)
+                        response.success()
+                    else:
+                        span.set_attribute("error", True)
+                        response.failure(
+                            f"Failed to retrieve book with ID {book_id} (status {response.status_code})"
+                        )
         else:
             # Fallback without tracing
             with self.client.get(url, headers={"Accept": "application/json"}, catch_response=True) as response:
-                if response.status_code != 200:
-                    response.failure(f"Failed to retrieve book with ID {book_id}")
-                else:
+                if response.status_code == 200:
                     response.success()
+                elif response.status_code == 404:
+                    self._evict_book_id(book_id)
+                    response.success()
+                else:
+                    response.failure(
+                        f"Failed to retrieve book with ID {book_id} (status {response.status_code})"
+                    )
 
     @task(1)
     def get_many_books(self):
@@ -181,7 +326,7 @@ class BookTasks(TaskSet):
                             book_id = response_data
                             if book_id:
                                 span.set_attribute("book.created_id", book_id)
-                                self.created_book_ids.append(book_id)
+                                self._append_new_ids([book_id])
                                 response.success()
                             else:
                                 span.set_attribute("error", True)
@@ -201,7 +346,7 @@ class BookTasks(TaskSet):
                         response_data = response.json()
                         book_id = response_data
                         if book_id:
-                            self.created_book_ids.append(book_id)
+                            self._append_new_ids([book_id])
                             response.success()
                         else:
                             response.failure("No ID returned in response")
@@ -238,7 +383,7 @@ class BookTasks(TaskSet):
                             ids = response.json()
                             if isinstance(ids, list):
                                 span.set_attribute("books.created_count", len(ids))
-                                self.created_book_ids.extend(ids)
+                                self._append_new_ids(ids)
                                 response.success()
                             else:
                                 span.set_attribute("error", True)
@@ -256,7 +401,7 @@ class BookTasks(TaskSet):
                     try:
                         ids = response.json()
                         if isinstance(ids, list):
-                            self.created_book_ids.extend(ids)
+                            self._append_new_ids(ids)
                             response.success()
                         else:
                             response.failure("Unexpected payload shape from bulk_add")
@@ -268,6 +413,7 @@ class BookTasks(TaskSet):
     @task(3)  # Weight of 3 for DELETE requests
     def delete_book(self):
         """Task to delete a previously created book."""
+        self._ensure_inventory()
         if self.created_book_ids:
             # Randomly select a book ID from the list of created books
             book_id = random.choice(self.created_book_ids)
@@ -284,22 +430,31 @@ class BookTasks(TaskSet):
                     with self.client.delete(url, catch_response=True) as response:
                         span.set_attribute("http.status_code", response.status_code)
                         if response.status_code in (200, 204):
-                            # Remove the ID from the list as it's deleted
-                            self.created_book_ids.remove(book_id)
+                            self._evict_book_id(book_id)
                             span.set_attribute("book.deleted", True)
+                            response.success()
+                        elif response.status_code == 404:
+                            span.set_attribute("book.already_deleted", True)
+                            self._evict_book_id(book_id)
                             response.success()
                         else:
                             span.set_attribute("error", True)
-                            response.failure(f"Failed to delete book with ID {book_id}: {response.text}")
+                            response.failure(
+                                f"Failed to delete book with ID {book_id}: status {response.status_code}"
+                            )
             else:
                 # Fallback without tracing
                 with self.client.delete(url, catch_response=True) as response:
                     if response.status_code in (200, 204):
-                        # Remove the ID from the list as it's deleted
-                        self.created_book_ids.remove(book_id)
+                        self._evict_book_id(book_id)
+                        response.success()
+                    elif response.status_code == 404:
+                        self._evict_book_id(book_id)
                         response.success()
                     else:
-                        response.failure(f"Failed to delete book with ID {book_id}: {response.text}")
+                        response.failure(
+                            f"Failed to delete book with ID {book_id}: status {response.status_code}"
+                        )
         else:
             # If no books have been created yet, skip deletion
             pass
@@ -447,8 +602,8 @@ class BookTasks(TaskSet):
 class BookUser(HttpUser):
     # Assign the task set to the user
     tasks = [BookTasks]
-    # Wait time between tasks (1 to 5 seconds)
-    wait_time = between(1, 5)
+    # Wait time between tasks (defaults to 0-50ms, configurable via LOCUST_MIN/MAX_WAIT)
+    wait_time = WAIT_TIME_STRATEGY
     # Set the host to the API's base URL
     host = os.environ.get("LOCUST_HOST", "http://localhost:8000")
 

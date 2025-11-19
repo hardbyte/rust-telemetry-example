@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
 use sqlx::Type;
-
 use utoipa::ToSchema;
+use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct BookCreateInput {
     // Normalized: create a work with a primary author (by id or by name)
     pub work_title: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub primary_author_id: Option<i32>,
+    pub primary_author_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub primary_author_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -27,10 +27,10 @@ pub enum BookStatus {
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, ToSchema)]
 pub struct Book {
     // Represents a denormalized view of a Work with its primary author
-    pub id: i32,                     // work id
-    pub work_id: i32,                // explicit work id reference (same as id)
+    pub id: Uuid,                    // work id
+    pub work_id: Uuid,               // explicit work id reference (same as id)
     pub work_title: String,          // works.title
-    pub primary_author_id: i32,      // authors.id (primary)
+    pub primary_author_id: Uuid,     // authors.id (primary)
     pub primary_author_name: String, // authors.name (primary)
     pub status: BookStatus,          // defaulted to Available (no longer from works table)
 }
@@ -62,7 +62,7 @@ pub enum SortOrder {
 pub struct BookSearchParams {
     pub search_term: Option<String>,
     pub statuses: Vec<BookStatus>,
-    pub min_id: Option<i32>,
+    pub min_id: Option<Uuid>,
     pub sort_by: SortField,
     pub sort_order: SortOrder,
     pub page: i64,
@@ -71,7 +71,7 @@ pub struct BookSearchParams {
 
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, ToSchema)]
 pub struct Author {
-    pub id: i32,
+    pub id: Uuid,
     pub name: String,
     pub sort_name: Option<String>,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -87,7 +87,7 @@ pub struct AuthorCreateInput {
 
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
 pub struct Work {
-    pub id: i32,
+    pub id: Uuid,
     pub title: String,
     pub original_language: Option<String>,
     pub description: Option<String>,
@@ -109,8 +109,8 @@ pub struct WorkCreateInput {
 
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
 pub struct WorkAuthor {
-    pub work_id: i32,
-    pub author_id: i32,
+    pub work_id: Uuid,
+    pub author_id: Uuid,
     pub role: String,
     pub primary_author: bool,
     pub ord: Option<i16>,
@@ -120,8 +120,8 @@ pub struct WorkAuthor {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WorkAuthorCreateInput {
-    pub work_id: i32,
-    pub author_id: i32,
+    pub work_id: Uuid,
+    pub author_id: Uuid,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub role: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -132,8 +132,8 @@ pub struct WorkAuthorCreateInput {
 
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
 pub struct Edition {
-    pub id: i32,
-    pub work_id: i32,
+    pub id: Uuid,
+    pub work_id: Uuid,
     pub isbn: String,
     pub title: Option<String>,
     pub publisher: Option<String>,
@@ -147,7 +147,7 @@ pub struct Edition {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct EditionCreateInput {
-    pub work_id: i32,
+    pub work_id: Uuid,
     pub isbn: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub title: Option<String>,
@@ -165,7 +165,7 @@ pub struct EditionCreateInput {
 
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
 pub struct Series {
-    pub id: i32,
+    pub id: Uuid,
     pub name: String,
     pub description: Option<String>,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -181,8 +181,8 @@ pub struct SeriesCreateInput {
 
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
 pub struct SeriesWorksAssociation {
-    pub series_id: i32,
-    pub work_id: i32,
+    pub series_id: Uuid,
+    pub work_id: Uuid,
     pub primary_work: bool,
     pub order_id: Option<i32>,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -191,8 +191,8 @@ pub struct SeriesWorksAssociation {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SeriesWorksAssociationCreateInput {
-    pub series_id: i32,
-    pub work_id: i32,
+    pub series_id: Uuid,
+    pub work_id: Uuid,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub primary_work: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -226,7 +226,7 @@ pub struct Event {
 
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, ToSchema)]
 pub struct BookSearchResult {
-    pub work_id: i32,
+    pub work_id: Uuid,
     pub work_title: String,
     pub primary_author_name: String,
     pub rank: f32,

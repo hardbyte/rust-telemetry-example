@@ -2,6 +2,7 @@ use reqwest::Client as HttpClient;
 use serde::Deserialize;
 use std::collections::HashMap;
 use tokio::time::{sleep, Duration};
+use uuid::Uuid;
 
 // Import the generated Progenitor client for API calls
 use client::{Client as BookappClient, ClientState};
@@ -181,9 +182,10 @@ async fn test_alert_framework_connectivity() -> TestResult<()> {
 
     // Test 5: Load generation capability
     println!("🔥 Testing load generation...");
-    for i in 1..=3 {
+    for _ in 0..3 {
         let _ = bookapp_client.get_all_books().send().await;
-        let _ = bookapp_client.get_book().id(i).send().await;
+        let random_id = Uuid::now_v7();
+        let _ = bookapp_client.get_book().id(random_id).send().await;
     }
 
     // Wait a moment for metrics to be collected
@@ -217,8 +219,12 @@ async fn test_alert_framework_connectivity() -> TestResult<()> {
 
     // Test 6: Error generation capability
     println!("💥 Testing error generation...");
-    let _ = bookapp_client.get_book().id(99999).send().await; // Should return 404
-    let _ = bookapp_client.get_book().id(-1).send().await; // Should return 404
+    let _ = bookapp_client.get_book().id(Uuid::nil()).send().await; // Should return 404
+    let _ = bookapp_client
+        .get_book()
+        .id(Uuid::from_u128(u128::MAX))
+        .send()
+        .await; // Should return 404
 
     println!("✅ Error generation test complete");
 

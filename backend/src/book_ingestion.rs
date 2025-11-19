@@ -4,6 +4,7 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tokio::time::sleep;
 use tracing::{debug, error, info, instrument, warn};
+use uuid::Uuid;
 
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::Message;
@@ -162,7 +163,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BookIngestionMessage {
-    pub book_id: i32,
+    pub book_id: Uuid,
     // other fields if necessary
 }
 
@@ -189,16 +190,13 @@ impl Extractor for HeaderExtractor<'_> {
     }
 }
 
-#[tracing::instrument(skip(book_repository, search_refresher), fields(book_id, search_refresh.decision))]
+#[tracing::instrument(skip(book_repository, search_refresher), fields(book_id = %book_id, search_refresh.decision))]
 async fn background_process_new_book(
-    book_id: i32,
+    book_id: Uuid,
     book_repository: Arc<BookRepositoryImpl>,
     search_refresher: Arc<SmartSearchRefresher>,
 ) -> Result<()> {
-    info!(
-        book_id = book_id,
-        "Starting background processing for new book"
-    );
+    info!(book_id = %book_id, "Starting background processing for new book");
 
     // Notify the smart refresher and attempt a smart refresh
     search_refresher.notify_book_changed();
@@ -214,23 +212,23 @@ async fn background_process_new_book(
                     rows_affected,
                 } => {
                     info!(
-                        book_id = book_id,
+                        book_id = %book_id,
                         refresh_duration_ms = duration.as_millis(),
                         rows_affected = rows_affected,
                         "Search index refreshed for new book"
                     );
                 }
                 RefreshDecision::Skip(reason) => {
-                    info!(book_id = book_id, reason = %reason, "Search index refresh skipped");
+                    info!(book_id = %book_id, reason = %reason, "Search index refresh skipped");
                 }
                 RefreshDecision::Refresh => {
-                    warn!(book_id = book_id, "Unexpected refresh decision state");
+                    warn!(book_id = %book_id, "Unexpected refresh decision state");
                 }
             }
         }
         Err(e) => {
             error!(
-                book_id = book_id,
+                book_id = %book_id,
                 error = %e,
                 "Search index refresh failed, continuing with book processing"
             );
@@ -244,7 +242,7 @@ async fn background_process_new_book(
     // - Send notifications to subscribers
 
     info!(
-        book_id = book_id,
+        book_id = %book_id,
         "Completed background processing for new book"
     );
 
@@ -335,7 +333,7 @@ pub async fn run_consumer(
                             serde_json::from_str::<BookIngestionMessage>(payload)
                         {
                             info!(
-                                book_id = book_message.book_id,
+                                book_id = %book_message.book_id,
                                 partition = m.partition(),
                                 offset = m.offset(),
                                 "Processing book ingestion message in backend"
@@ -350,7 +348,7 @@ pub async fn run_consumer(
                             .await
                             {
                                 error!(
-                                    book_id = book_message.book_id,
+                                    book_id = %book_message.book_id,
                                     error = %e,
                                     "Failed to process book ingestion message"
                                 );

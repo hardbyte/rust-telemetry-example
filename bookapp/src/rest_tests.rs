@@ -12,16 +12,15 @@ mod tests {
     use bookapp_dal::models::BookCreateInput;
     use bookapp_dal::models::BookStatus;
     use bookapp_dal::repository::{
-        BookRepository, BookRepositoryImpl, EditionRepositoryImpl, EventRepositoryImpl,
-        SeriesRepositoryImpl,
+        BookRepositoryImpl, EditionRepositoryImpl, EventRepositoryImpl, SeriesRepositoryImpl,
     };
-    use bookapp_dal::repository::{EditionRepository, EventRepository, SeriesRepository};
     use dotenv::dotenv;
     use rdkafka::producer::FutureProducer;
     use serde_json::Value;
     use sqlx::PgPool;
     use std::sync::Arc;
     use tower::ServiceExt;
+    use uuid::Uuid;
 
     // Helper to setup a transactional test app
     async fn setup_transactional_test_app(pool: PgPool) -> axum::Router {
@@ -62,9 +61,109 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-
+        let headers = response.headers().clone();
         let json = get_response_json(response).await;
         assert!(json.is_array(), "Response should be an array of books");
+        assert_eq!(
+            headers
+                .get("x-pagination-limit")
+                .and_then(|v| v.to_str().ok()),
+            Some("100")
+        );
+        assert_eq!(
+            headers
+                .get("x-pagination-offset")
+                .and_then(|v| v.to_str().ok()),
+            Some("0")
+        );
+    }
+
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
+    async fn test_get_book_ids(pool: PgPool) {
+        let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        for idx in 0..2 {
+            let input = BookCreateInput {
+                work_title: format!("IDs Title {idx}"),
+                primary_author_id: None,
+                primary_author_name: Some(format!("IDs Author {idx}")),
+                status: Some(BookStatus::Available),
+            };
+            repo.create(input).await.unwrap();
+        }
+
+        let app = setup_transactional_test_app(pool).await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/books/id_list?limit=2&offset=0")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let headers = response.headers().clone();
+        let json = get_response_json(response).await;
+        let ids = json.as_array().expect("ids array");
+        assert_eq!(ids.len(), 2);
+        assert!(ids.iter().all(|value| value.as_str().is_some()));
+        assert_eq!(
+            headers
+                .get("x-pagination-next-offset")
+                .and_then(|v| v.to_str().ok()),
+            Some("2")
+        );
+    }
+
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
+    async fn test_get_all_books_respects_pagination(pool: PgPool) {
+        // Seed a few books to ensure predictable pagination
+        let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        for idx in 0..3 {
+            let input = BookCreateInput {
+                work_title: format!("Paging Title {idx}"),
+                primary_author_id: None,
+                primary_author_name: Some(format!("Paging Author {idx}")),
+                status: Some(BookStatus::Available),
+            };
+            repo.create(input).await.unwrap();
+        }
+
+        let app = setup_transactional_test_app(pool).await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/books?limit=2&offset=1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let headers = response.headers().clone();
+        let json = get_response_json(response).await;
+        let books = json.as_array().expect("books array");
+        assert_eq!(books.len(), 2);
+        assert_eq!(
+            headers
+                .get("x-pagination-limit")
+                .and_then(|v| v.to_str().ok()),
+            Some("2")
+        );
+        assert_eq!(
+            headers
+                .get("x-pagination-offset")
+                .and_then(|v| v.to_str().ok()),
+            Some("1")
+        );
+        assert_eq!(
+            headers
+                .get("x-pagination-next-offset")
+                .and_then(|v| v.to_str().ok()),
+            Some("3")
+        );
     }
 
     #[sqlx::test(migrations = "../bookapp-dal/migrations")]
@@ -93,7 +192,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         let json = get_response_json(response).await;
-        assert_eq!(json["id"], book_id);
+        let id_str = json["id"].as_str().expect("id string");
+        assert_eq!(id_str, book_id.to_string());
         assert_eq!(json["work_title"], "Test Title");
         assert_eq!(json["primary_author_name"], "Test Author");
         assert_eq!(json["status"], "Available");
@@ -105,7 +205,7 @@ mod tests {
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri("/books/99999")
+                    .uri(format!("/books/{}", Uuid::nil()))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -148,7 +248,7 @@ mod tests {
         let app = setup_transactional_test_app(pool).await;
         let req = Request::builder()
             .method("PATCH")
-            .uri("/books/99999")
+            .uri(format!("/books/{}", Uuid::nil()))
             .header("content-type", "application/json")
             .body(Body::from(
                 r#"{"work_title":"T","primary_author_name":"A"}"#,
@@ -202,7 +302,11 @@ mod tests {
         assert_eq!(response.status(), StatusCode::CREATED);
 
         let json = get_response_json(response).await;
-        let book_id: i32 = json.as_i64().unwrap() as i32;
+        let book_id: Uuid = json
+            .as_str()
+            .expect("book id as string")
+            .parse()
+            .expect("valid uuid");
 
         // Verify the book was actually created
         let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
@@ -264,7 +368,11 @@ mod tests {
         // Verify both books were created
         let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
         for book_id_value in book_ids {
-            let book_id = book_id_value.as_i64().unwrap() as i32;
+            let book_id = book_id_value
+                .as_str()
+                .expect("book id as string")
+                .parse::<Uuid>()
+                .expect("valid uuid");
             let book = repo.find_by_id(book_id).await.unwrap().unwrap();
             assert!(["Author1", "Author2"].contains(&book.primary_author_name.as_str()));
             assert!(["Title1", "Title2"].contains(&book.work_title.as_str()));
@@ -339,7 +447,7 @@ mod tests {
         let app = setup_transactional_test_app(pool).await;
         let req = Request::builder()
             .method("DELETE")
-            .uri("/books/99999")
+            .uri(format!("/books/{}", Uuid::nil()))
             .body(Body::empty())
             .unwrap();
         let response = app.oneshot(req).await.unwrap();
@@ -422,7 +530,11 @@ mod tests {
         assert_eq!(response.status(), StatusCode::CREATED);
 
         let work_id_json = get_response_json(response).await;
-        let work_id: i32 = work_id_json.as_i64().unwrap() as i32;
+        let work_id: Uuid = work_id_json
+            .as_str()
+            .expect("work id as string")
+            .parse()
+            .expect("valid uuid");
 
         // Verify an outbox event exists for this work
         let events = EventRepositoryImpl::single_pool(Arc::new(pool))
@@ -449,22 +561,36 @@ mod tests {
             .unwrap();
         let resp_work = app.clone().oneshot(req_work).await.unwrap();
         assert_eq!(resp_work.status(), StatusCode::CREATED);
-        let work_id: i32 = get_response_json(resp_work).await.as_i64().unwrap() as i32;
+        let work_id: Uuid = get_response_json(resp_work)
+            .await
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
 
         // Create an edition for that work
         let req_edition = Request::builder()
             .method("POST")
             .uri("/editions/add")
             .header("content-type", "application/json")
-            .body(Body::from(format!(
-                r#"{{"work_id":{},"isbn":"1234567890123","title":"Edition Title"}}"#,
-                work_id
-            )))
+            .body(Body::from(
+                serde_json::json!({
+                    "work_id": work_id,
+                    "isbn": "1234567890123",
+                    "title": "Edition Title"
+                })
+                .to_string(),
+            ))
             .unwrap();
         let resp_edition = app.clone().oneshot(req_edition).await.unwrap();
         assert_eq!(resp_edition.status(), StatusCode::CREATED);
 
-        let edition_id: i32 = get_response_json(resp_edition).await.as_i64().unwrap() as i32;
+        let edition_id: Uuid = get_response_json(resp_edition)
+            .await
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
         // Verify via DAL
         let edition = EditionRepositoryImpl::single_pool(Arc::new(pool))
             .find_by_id(edition_id)
@@ -488,7 +614,12 @@ mod tests {
             .unwrap();
         let resp_series = app.clone().oneshot(req_series).await.unwrap();
         assert_eq!(resp_series.status(), StatusCode::CREATED);
-        let series_id: i32 = get_response_json(resp_series).await.as_i64().unwrap() as i32;
+        let series_id: Uuid = get_response_json(resp_series)
+            .await
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
 
         // Create a work
         let req_work = Request::builder()
@@ -499,17 +630,26 @@ mod tests {
             .unwrap();
         let resp_work = app.clone().oneshot(req_work).await.unwrap();
         assert_eq!(resp_work.status(), StatusCode::CREATED);
-        let work_id: i32 = get_response_json(resp_work).await.as_i64().unwrap() as i32;
+        let work_id: Uuid = get_response_json(resp_work)
+            .await
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
 
         // Add work to series
         let req_assoc = Request::builder()
             .method("POST")
             .uri(format!("/series/{}/works/add", series_id))
             .header("content-type", "application/json")
-            .body(Body::from(format!(
-                r#"{{"work_id":{},"primary_work":true,"order_id":1}}"#,
-                work_id
-            )))
+            .body(Body::from(
+                serde_json::json!({
+                    "work_id": work_id,
+                    "primary_work": true,
+                    "order_id": 1
+                })
+                .to_string(),
+            ))
             .unwrap();
         let resp_assoc = app.clone().oneshot(req_assoc).await.unwrap();
         assert_eq!(resp_assoc.status(), StatusCode::NO_CONTENT);

@@ -49,12 +49,12 @@ pub mod types {
     ///  ],
     ///  "properties": {
     ///    "id": {
-    ///      "type": "integer",
-    ///      "format": "int32"
+    ///      "type": "string",
+    ///      "format": "uuid"
     ///    },
     ///    "primary_author_id": {
-    ///      "type": "integer",
-    ///      "format": "int32"
+    ///      "type": "string",
+    ///      "format": "uuid"
     ///    },
     ///    "primary_author_name": {
     ///      "type": "string"
@@ -68,8 +68,8 @@ pub mod types {
     ///      ]
     ///    },
     ///    "work_id": {
-    ///      "type": "integer",
-    ///      "format": "int32"
+    ///      "type": "string",
+    ///      "format": "uuid"
     ///    },
     ///    "work_title": {
     ///      "type": "string"
@@ -80,11 +80,11 @@ pub mod types {
     /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
     pub struct Book {
-        pub id: i32,
-        pub primary_author_id: i32,
+        pub id: ::uuid::Uuid,
+        pub primary_author_id: ::uuid::Uuid,
         pub primary_author_name: ::std::string::String,
         pub status: BookStatus,
-        pub work_id: i32,
+        pub work_id: ::uuid::Uuid,
         pub work_title: ::std::string::String,
     }
     impl ::std::convert::From<&Book> for Book {
@@ -109,8 +109,8 @@ pub mod types {
     ///  ],
     ///  "properties": {
     ///    "primary_author_id": {
-    ///      "type": "integer",
-    ///      "format": "int32"
+    ///      "type": "string",
+    ///      "format": "uuid"
     ///    },
     ///    "primary_author_name": {
     ///      "type": "string"
@@ -133,7 +133,7 @@ pub mod types {
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
     pub struct BookCreateIn {
         #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
-        pub primary_author_id: ::std::option::Option<i32>,
+        pub primary_author_id: ::std::option::Option<::uuid::Uuid>,
         #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
         pub primary_author_name: ::std::option::Option<::std::string::String>,
         #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
@@ -190,9 +190,9 @@ pub mod types {
     impl ::std::fmt::Display for BookCreateInStatus {
         fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
             match *self {
-                Self::Available => write!(f, "Available"),
-                Self::Borrowed => write!(f, "Borrowed"),
-                Self::Lost => write!(f, "Lost"),
+                Self::Available => f.write_str("Available"),
+                Self::Borrowed => f.write_str("Borrowed"),
+                Self::Lost => f.write_str("Lost"),
             }
         }
     }
@@ -254,8 +254,8 @@ pub mod types {
     ///      "format": "float"
     ///    },
     ///    "work_id": {
-    ///      "type": "integer",
-    ///      "format": "int32"
+    ///      "type": "string",
+    ///      "format": "uuid"
     ///    },
     ///    "work_title": {
     ///      "type": "string"
@@ -270,7 +270,7 @@ pub mod types {
         pub headline: ::std::option::Option<::std::string::String>,
         pub primary_author_name: ::std::string::String,
         pub rank: f32,
-        pub work_id: i32,
+        pub work_id: ::uuid::Uuid,
         pub work_title: ::std::string::String,
     }
     impl ::std::convert::From<&BookSearchResult> for BookSearchResult {
@@ -323,9 +323,9 @@ pub mod types {
     impl ::std::fmt::Display for BookStatus {
         fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
             match *self {
-                Self::Available => write!(f, "Available"),
-                Self::Borrowed => write!(f, "Borrowed"),
-                Self::Lost => write!(f, "Lost"),
+                Self::Available => f.write_str("Available"),
+                Self::Borrowed => f.write_str("Borrowed"),
+                Self::Lost => f.write_str("Lost"),
             }
         }
     }
@@ -366,12 +366,12 @@ pub mod types {
     pub mod builder {
         #[derive(Clone, Debug)]
         pub struct Book {
-            id: ::std::result::Result<i32, ::std::string::String>,
-            primary_author_id: ::std::result::Result<i32, ::std::string::String>,
+            id: ::std::result::Result<::uuid::Uuid, ::std::string::String>,
+            primary_author_id: ::std::result::Result<::uuid::Uuid, ::std::string::String>,
             primary_author_name:
                 ::std::result::Result<::std::string::String, ::std::string::String>,
             status: ::std::result::Result<super::BookStatus, ::std::string::String>,
-            work_id: ::std::result::Result<i32, ::std::string::String>,
+            work_id: ::std::result::Result<::uuid::Uuid, ::std::string::String>,
             work_title: ::std::result::Result<::std::string::String, ::std::string::String>,
         }
         impl ::std::default::Default for Book {
@@ -391,7 +391,7 @@ pub mod types {
         impl Book {
             pub fn id<T>(mut self, value: T) -> Self
             where
-                T: ::std::convert::TryInto<i32>,
+                T: ::std::convert::TryInto<::uuid::Uuid>,
                 T::Error: ::std::fmt::Display,
             {
                 self.id = value
@@ -401,7 +401,7 @@ pub mod types {
             }
             pub fn primary_author_id<T>(mut self, value: T) -> Self
             where
-                T: ::std::convert::TryInto<i32>,
+                T: ::std::convert::TryInto<::uuid::Uuid>,
                 T::Error: ::std::fmt::Display,
             {
                 self.primary_author_id = value.try_into().map_err(|e| {
@@ -437,7 +437,7 @@ pub mod types {
             }
             pub fn work_id<T>(mut self, value: T) -> Self
             where
-                T: ::std::convert::TryInto<i32>,
+                T: ::std::convert::TryInto<::uuid::Uuid>,
                 T::Error: ::std::fmt::Display,
             {
                 self.work_id = value
@@ -484,7 +484,7 @@ pub mod types {
         #[derive(Clone, Debug)]
         pub struct BookCreateIn {
             primary_author_id:
-                ::std::result::Result<::std::option::Option<i32>, ::std::string::String>,
+                ::std::result::Result<::std::option::Option<::uuid::Uuid>, ::std::string::String>,
             primary_author_name: ::std::result::Result<
                 ::std::option::Option<::std::string::String>,
                 ::std::string::String,
@@ -508,7 +508,7 @@ pub mod types {
         impl BookCreateIn {
             pub fn primary_author_id<T>(mut self, value: T) -> Self
             where
-                T: ::std::convert::TryInto<::std::option::Option<i32>>,
+                T: ::std::convert::TryInto<::std::option::Option<::uuid::Uuid>>,
                 T::Error: ::std::fmt::Display,
             {
                 self.primary_author_id = value.try_into().map_err(|e| {
@@ -585,7 +585,7 @@ pub mod types {
             primary_author_name:
                 ::std::result::Result<::std::string::String, ::std::string::String>,
             rank: ::std::result::Result<f32, ::std::string::String>,
-            work_id: ::std::result::Result<i32, ::std::string::String>,
+            work_id: ::std::result::Result<::uuid::Uuid, ::std::string::String>,
             work_title: ::std::result::Result<::std::string::String, ::std::string::String>,
         }
         impl ::std::default::Default for BookSearchResult {
@@ -637,7 +637,7 @@ pub mod types {
             }
             pub fn work_id<T>(mut self, value: T) -> Self
             where
-                T: ::std::convert::TryInto<i32>,
+                T: ::std::convert::TryInto<::uuid::Uuid>,
                 T::Error: ::std::fmt::Display,
             {
                 self.work_id = value
@@ -703,7 +703,7 @@ impl Client {
     pub fn new(baseurl: &str, inner: crate::ClientState) -> Self {
         #[cfg(not(target_arch = "wasm32"))]
         let client = {
-            let dur = std::time::Duration::from_secs(15);
+            let dur = ::std::time::Duration::from_secs(15u64);
             reqwest::ClientBuilder::new()
                 .connect_timeout(dur)
                 .timeout(dur)
@@ -750,12 +750,17 @@ impl Client {
 
     Sends a `GET` request to `/books`
 
+    Arguments:
+    - `limit`: Maximum number of books to return (default 100, max 500)
+    - `offset`: Number of books to skip before returning results
     ```ignore
     let response = client.get_all_books()
+        .limit(limit)
+        .offset(offset)
         .send()
         .await;
     ```*/
-    pub fn get_all_books(&self) -> builder::GetAllBooks {
+    pub fn get_all_books(&self) -> builder::GetAllBooks<'_> {
         builder::GetAllBooks::new(self)
     }
     /**Create a new book
@@ -770,7 +775,7 @@ impl Client {
         .send()
         .await;
     ```*/
-    pub fn create_book(&self) -> builder::CreateBook {
+    pub fn create_book(&self) -> builder::CreateBook<'_> {
         builder::CreateBook::new(self)
     }
     /**Get a book by ID
@@ -785,7 +790,7 @@ impl Client {
         .send()
         .await;
     ```*/
-    pub fn get_book(&self) -> builder::GetBook {
+    pub fn get_book(&self) -> builder::GetBook<'_> {
         builder::GetBook::new(self)
     }
     /**Delete a book by ID
@@ -800,7 +805,7 @@ impl Client {
         .send()
         .await;
     ```*/
-    pub fn delete_book(&self) -> builder::DeleteBook {
+    pub fn delete_book(&self) -> builder::DeleteBook<'_> {
         builder::DeleteBook::new(self)
     }
     /**Update a book by ID
@@ -817,7 +822,7 @@ impl Client {
         .send()
         .await;
     ```*/
-    pub fn update_book(&self) -> builder::UpdateBook {
+    pub fn update_book(&self) -> builder::UpdateBook<'_> {
         builder::UpdateBook::new(self)
     }
     /**Search books
@@ -834,7 +839,7 @@ impl Client {
         .send()
         .await;
     ```*/
-    pub fn search_books(&self) -> builder::SearchBooks {
+    pub fn search_books(&self) -> builder::SearchBooks<'_> {
         builder::SearchBooks::new(self)
     }
 }
@@ -853,14 +858,45 @@ pub mod builder {
     #[derive(Debug, Clone)]
     pub struct GetAllBooks<'a> {
         client: &'a super::Client,
+        limit: Result<Option<::std::num::NonZeroU64>, String>,
+        offset: Result<Option<u64>, String>,
     }
     impl<'a> GetAllBooks<'a> {
         pub fn new(client: &'a super::Client) -> Self {
-            Self { client: client }
+            Self {
+                client: client,
+                limit: Ok(None),
+                offset: Ok(None),
+            }
+        }
+        pub fn limit<V>(mut self, value: V) -> Self
+        where
+            V: std::convert::TryInto<::std::num::NonZeroU64>,
+        {
+            self.limit = value.try_into().map(Some).map_err(|_| {
+                "conversion to `:: std :: num :: NonZeroU64` for limit failed".to_string()
+            });
+            self
+        }
+        pub fn offset<V>(mut self, value: V) -> Self
+        where
+            V: std::convert::TryInto<u64>,
+        {
+            self.offset = value
+                .try_into()
+                .map(Some)
+                .map_err(|_| "conversion to `u64` for offset failed".to_string());
+            self
         }
         ///Sends a `GET` request to `/books`
         pub async fn send(self) -> Result<ResponseValue<::std::vec::Vec<types::Book>>, Error<()>> {
-            let Self { client } = self;
+            let Self {
+                client,
+                limit,
+                offset,
+            } = self;
+            let limit = limit.map_err(Error::InvalidRequest)?;
+            let offset = offset.map_err(Error::InvalidRequest)?;
             let url = format!("{}/books", client.baseurl,);
             let mut header_map = ::reqwest::header::HeaderMap::with_capacity(1usize);
             header_map.append(
@@ -875,6 +911,8 @@ pub mod builder {
                     ::reqwest::header::ACCEPT,
                     ::reqwest::header::HeaderValue::from_static("application/json"),
                 )
+                .query(&progenitor_client::QueryParam::new("limit", &limit))
+                .query(&progenitor_client::QueryParam::new("offset", &offset))
                 .headers(header_map)
                 .build()?;
             let info = OperationInfo {
@@ -981,7 +1019,7 @@ pub mod builder {
     #[derive(Debug, Clone)]
     pub struct GetBook<'a> {
         client: &'a super::Client,
-        id: Result<i32, String>,
+        id: Result<::uuid::Uuid, String>,
     }
     impl<'a> GetBook<'a> {
         pub fn new(client: &'a super::Client) -> Self {
@@ -992,11 +1030,11 @@ pub mod builder {
         }
         pub fn id<V>(mut self, value: V) -> Self
         where
-            V: std::convert::TryInto<i32>,
+            V: std::convert::TryInto<::uuid::Uuid>,
         {
             self.id = value
                 .try_into()
-                .map_err(|_| "conversion to `i32` for id failed".to_string());
+                .map_err(|_| "conversion to `:: uuid :: Uuid` for id failed".to_string());
             self
         }
         ///Sends a `GET` request to `/books/{id}`
@@ -1048,7 +1086,7 @@ pub mod builder {
     #[derive(Debug, Clone)]
     pub struct DeleteBook<'a> {
         client: &'a super::Client,
-        id: Result<i32, String>,
+        id: Result<::uuid::Uuid, String>,
     }
     impl<'a> DeleteBook<'a> {
         pub fn new(client: &'a super::Client) -> Self {
@@ -1059,11 +1097,11 @@ pub mod builder {
         }
         pub fn id<V>(mut self, value: V) -> Self
         where
-            V: std::convert::TryInto<i32>,
+            V: std::convert::TryInto<::uuid::Uuid>,
         {
             self.id = value
                 .try_into()
-                .map_err(|_| "conversion to `i32` for id failed".to_string());
+                .map_err(|_| "conversion to `:: uuid :: Uuid` for id failed".to_string());
             self
         }
         ///Sends a `DELETE` request to `/books/{id}`
@@ -1107,7 +1145,7 @@ pub mod builder {
     #[derive(Debug, Clone)]
     pub struct UpdateBook<'a> {
         client: &'a super::Client,
-        id: Result<i32, String>,
+        id: Result<::uuid::Uuid, String>,
         body: Result<types::builder::BookCreateIn, String>,
     }
     impl<'a> UpdateBook<'a> {
@@ -1120,11 +1158,11 @@ pub mod builder {
         }
         pub fn id<V>(mut self, value: V) -> Self
         where
-            V: std::convert::TryInto<i32>,
+            V: std::convert::TryInto<::uuid::Uuid>,
         {
             self.id = value
                 .try_into()
-                .map_err(|_| "conversion to `i32` for id failed".to_string());
+                .map_err(|_| "conversion to `:: uuid :: Uuid` for id failed".to_string());
             self
         }
         pub fn body<V>(mut self, value: V) -> Self

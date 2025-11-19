@@ -2,42 +2,16 @@ use async_trait::async_trait;
 use axum::extract::{Path, State};
 use axum::routing::{get, put};
 use axum::{extract::Request, middleware::Next, response::IntoResponse, Extension, Json, Router};
+use error_injection_dal::{
+    ErrorInjectionConfig, ErrorInjectionConfigInput, ErrorInjectionRepository,
+};
 use hyper::StatusCode;
 use matchit::Router as MatchRouter;
 use rand::Rng;
-use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, PgPool};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-
-#[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
-pub struct ErrorInjectionConfig {
-    id: i32,
-    /// The endpoint pattern to match (e.g., "/books/{id}").
-    endpoint_pattern: String,
-    /// The HTTP method to match (e.g., "GET", "POST").
-    http_method: String,
-    /// The rate at which to inject errors (between 0.0 and 1.0).
-    error_rate: f64,
-    /// The HTTP status code to return when injecting an error.
-    error_code: i32,
-    /// Optional custom error message to return.
-    error_message: Option<String>,
-    /// Optional latency in milliseconds to inject before processing the request.
-    latency_ms: Option<i32>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ErrorInjectionConfigInput {
-    endpoint_pattern: String,
-    http_method: String,
-    error_rate: f64,
-    error_code: i32,
-    error_message: Option<String>,
-    latency_ms: Option<i32>,
-}
 
 /// Trait that defines the storage interface for error injection configurations.
 ///
@@ -87,80 +61,37 @@ pub trait ErrorInjectionConfigStore: Send + Sync + 'static {
     async fn delete_config(&self, id: i32) -> anyhow::Result<()>;
 }
 
-/// Implementation of `ErrorInjectionConfigStore` trait using PostgreSQL as the storage backend.
+/// Implementation of `ErrorInjectionConfigStore` trait using PostgreSQL via the DAL.
 #[derive(Clone)]
 pub struct PostgresErrorInjectionConfigStore {
-    /// The PostgreSQL connection pool.
-    pool: Arc<PgPool>,
+    repo: ErrorInjectionRepository,
 }
 
 impl PostgresErrorInjectionConfigStore {
     /// Creates a new instance of `PostgresErrorInjectionConfigStore`.
-    ///
-    /// # Arguments
-    ///
-    /// * `pool` - The PostgreSQL connection pool.
-    pub fn new(pool: Arc<PgPool>) -> Self {
-        Self { pool }
+    pub fn new(repo: ErrorInjectionRepository) -> Self {
+        Self { repo }
     }
 }
 
 #[async_trait]
 impl ErrorInjectionConfigStore for PostgresErrorInjectionConfigStore {
     async fn get_all_configs(&self) -> anyhow::Result<Vec<ErrorInjectionConfig>> {
-        let configs: Vec<ErrorInjectionConfig> = sqlx::query_as(
-            r#"
-            SELECT id, endpoint_pattern, http_method, error_rate, error_code, error_message, latency_ms
-            FROM error_injection_config
-            LIMIT 1000
-            "#,
-        )
-        .fetch_all(self.pool.as_ref())
-        .await?;
-
-        Ok(configs)
+        Ok(self.repo.list_all().await?)
     }
 
     async fn get_configs_for_method(
         &self,
         method: &str,
     ) -> anyhow::Result<Vec<ErrorInjectionConfig>> {
-        let configs: Vec<ErrorInjectionConfig> = sqlx::query_as(
-            r#"
-            SELECT id, endpoint_pattern, http_method, error_rate, error_code, error_message, latency_ms
-            FROM error_injection_config
-            WHERE http_method = $1
-            LIMIT 100
-            "#,
-        )
-        .bind(method)
-        .fetch_all(self.pool.as_ref())
-        .await?;
-
-        Ok(configs)
+        Ok(self.repo.list_for_method(method).await?)
     }
 
     async fn create_config(
         &self,
         input: ErrorInjectionConfigInput,
     ) -> anyhow::Result<ErrorInjectionConfig> {
-        let inserted_config = sqlx::query_as::<_, ErrorInjectionConfig>(
-            r#"
-            INSERT INTO error_injection_config (endpoint_pattern, http_method, error_rate, error_code, error_message, latency_ms)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING id, endpoint_pattern, http_method, error_rate, error_code, error_message, latency_ms
-            "#
-        )
-            .bind(input.endpoint_pattern)
-            .bind(input.http_method)
-            .bind(input.error_rate)
-            .bind(input.error_code)
-            .bind(input.error_message)
-            .bind(input.latency_ms)
-            .fetch_one(self.pool.as_ref())
-            .await?;
-
-        Ok(inserted_config)
+        Ok(self.repo.create(input).await?)
     }
 
     async fn update_config(
@@ -168,37 +99,11 @@ impl ErrorInjectionConfigStore for PostgresErrorInjectionConfigStore {
         id: i32,
         input: ErrorInjectionConfigInput,
     ) -> anyhow::Result<ErrorInjectionConfig> {
-        let updated_config = sqlx::query_as::<_, ErrorInjectionConfig>(
-            r#"
-            UPDATE error_injection_config
-            SET endpoint_pattern = $2, http_method = $3, error_rate = $4, error_code = $5, error_message = $6, latency_ms = $7
-            WHERE id = $1
-            RETURNING id, endpoint_pattern, http_method, error_rate, error_code, error_message, latency_ms
-            "#
-        )
-            .bind(id)
-            .bind(input.endpoint_pattern)
-            .bind(input.http_method)
-            .bind(input.error_rate)
-            .bind(input.error_code)
-            .bind(input.error_message)
-            .bind(input.latency_ms)
-            .fetch_one(self.pool.as_ref())
-            .await?;
-
-        Ok(updated_config)
+        Ok(self.repo.update(id, input).await?)
     }
 
     async fn delete_config(&self, id: i32) -> anyhow::Result<()> {
-        sqlx::query(
-            r#"
-            DELETE FROM error_injection_config WHERE id = $1
-            "#,
-        )
-        .bind(id)
-        .execute(self.pool.as_ref())
-        .await?;
-
+        self.repo.delete(id).await?;
         Ok(())
     }
 }
@@ -410,16 +315,20 @@ pub async fn delete_config(
 /// use std::sync::Arc;
 /// use axum::{Router, Extension};
 /// use sqlx::PgPool;
+/// use error_injection_dal::ErrorInjectionRepository;
 /// use middleware::{error_injection_middleware, PostgresErrorInjectionConfigStore};
 ///
-/// fn router(connection_pool: PgPool) -> Router {
+/// fn router(connection_pools: DatabasePools) -> Router {
 ///     // Create the ErrorInjectionConfigStore
 ///     let error_injection_store: Arc<dyn ErrorInjectionConfigStore> = Arc::new(
-///         PostgresErrorInjectionConfigStore::new(connection_pool.clone())
+///         PostgresErrorInjectionConfigStore::new(ErrorInjectionRepository::new(
+///             connection_pools.write_pool.clone(),
+///             connection_pools.read_pool.clone(),
+///         ))
 ///     );
 ///
 ///     Router::new()
-///         .layer(Extension(connection_pool))
+///         .layer(Extension(connection_pools))
 ///         .layer(Extension(error_injection_store))
 ///         .layer(axum::middleware::from_fn(error_injection_middleware))
 ///         // ... other routes and layers ...

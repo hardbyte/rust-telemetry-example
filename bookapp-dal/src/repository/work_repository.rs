@@ -1,10 +1,9 @@
 use crate::error::{DalError, Result};
 use crate::models::{Work, WorkAuthor, WorkAuthorCreateInput, WorkCreateInput};
-use crate::repository::traits::WorkRepository;
-use async_trait::async_trait;
 use sqlx::{Executor, PgPool, Postgres};
 use std::sync::Arc;
 use tracing::{debug, instrument, warn};
+use uuid::Uuid;
 
 pub struct WorkRepositoryImpl {
     write_pool: Arc<PgPool>,
@@ -35,7 +34,7 @@ impl WorkRepositoryImpl {
         skip_all,
         fields(work.title = %input.title)
     )]
-    pub async fn create_with<'e, E>(&self, exec: E, input: WorkCreateInput) -> Result<i32>
+    pub async fn create_with<'e, E>(&self, exec: E, input: WorkCreateInput) -> Result<Uuid>
     where
         E: Executor<'e, Database = Postgres>,
     {
@@ -57,7 +56,7 @@ impl WorkRepositoryImpl {
     }
 
     #[instrument(name = "find_work_by_id_with", skip_all, fields(work.id = %id))]
-    pub async fn find_by_id_with<'e, E>(&self, exec: E, id: i32) -> Result<Option<Work>>
+    pub async fn find_by_id_with<'e, E>(&self, exec: E, id: Uuid) -> Result<Option<Work>>
     where
         E: Executor<'e, Database = Postgres>,
     {
@@ -149,7 +148,7 @@ impl WorkRepositoryImpl {
     }
 
     #[instrument(name = "delete_work_with", skip_all, fields(work.id = %id))]
-    pub async fn delete_with<'e, E>(&self, exec: E, id: i32) -> Result<()>
+    pub async fn delete_with<'e, E>(&self, exec: E, id: Uuid) -> Result<()>
     where
         E: Executor<'e, Database = Postgres>,
     {
@@ -207,7 +206,7 @@ impl WorkRepositoryImpl {
     }
 
     #[instrument(name = "list_authors_for_work_with", skip_all, fields(work.id = %work_id))]
-    pub async fn list_authors_with<'e, E>(&self, exec: E, work_id: i32) -> Result<Vec<WorkAuthor>>
+    pub async fn list_authors_with<'e, E>(&self, exec: E, work_id: Uuid) -> Result<Vec<WorkAuthor>>
     where
         E: Executor<'e, Database = Postgres>,
     {
@@ -233,75 +232,20 @@ impl WorkRepositoryImpl {
 
         Ok(rows)
     }
-}
 
-#[async_trait]
-impl WorkRepository for WorkRepositoryImpl {
     #[instrument(name = "create_work", skip(self, input), fields(work.title = %input.title))]
-    async fn create(&self, input: WorkCreateInput) -> Result<i32> {
-        let row = sqlx::query!(
-            r#"
-            INSERT INTO works (title, original_language, description, publication_year)
-            VALUES ($1, $2, $3, $4)
-            RETURNING id
-            "#,
-            input.title,
-            input.original_language,
-            input.description,
-            input.publication_year
-        )
-        .fetch_one(self.write_pool.as_ref())
-        .await?;
-
-        Ok(row.id)
+    pub async fn create(&self, input: WorkCreateInput) -> Result<Uuid> {
+        self.create_with(&*self.write_pool, input).await
     }
 
     #[instrument(name = "find_work_by_id", skip(self), fields(work.id = %id))]
-    async fn find_by_id(&self, id: i32) -> Result<Option<Work>> {
-        let work = sqlx::query_as!(
-            Work,
-            r#"
-            SELECT
-                id,
-                title,
-                original_language,
-                description,
-                publication_year,
-                created_at,
-                updated_at
-            FROM works
-            WHERE id = $1
-            "#,
-            id
-        )
-        .fetch_optional(self.read_pool.as_ref())
-        .await?;
-
-        Ok(work)
+    pub async fn find_by_id(&self, id: Uuid) -> Result<Option<Work>> {
+        self.find_by_id_with(&*self.read_pool, id).await
     }
 
     #[instrument(name = "find_all_works", skip(self))]
-    async fn find_all(&self) -> Result<Vec<Work>> {
-        debug!("Fetching all works");
-        let works = sqlx::query_as!(
-            Work,
-            r#"
-            SELECT
-                id,
-                title,
-                original_language,
-                description,
-                publication_year,
-                created_at,
-                updated_at
-            FROM works
-            ORDER BY title, id
-            "#
-        )
-        .fetch_all(self.read_pool.as_ref())
-        .await?;
-
-        Ok(works)
+    pub async fn find_all(&self) -> Result<Vec<Work>> {
+        self.find_all_with(&*self.read_pool).await
     }
 
     #[instrument(
@@ -309,55 +253,13 @@ impl WorkRepository for WorkRepositoryImpl {
         skip(self),
         fields(work.id = %work.id, work.title = %work.title)
     )]
-    async fn update(&self, work: Work) -> Result<i32> {
-        let result = sqlx::query!(
-            r#"
-            UPDATE works
-            SET
-                title = $2,
-                original_language = $3,
-                description = $4,
-                publication_year = $5
-            WHERE id = $1
-            "#,
-            work.id,
-            work.title,
-            work.original_language,
-            work.description,
-            work.publication_year
-        )
-        .execute(self.write_pool.as_ref())
-        .await?;
-
-        let rows_affected: i32 = result.rows_affected().try_into().unwrap_or(0);
-        if rows_affected == 0 {
-            warn!("Update affected 0 rows - work may not exist");
-        } else {
-            debug!("Successfully updated work");
-        }
-
-        Ok(rows_affected)
+    pub async fn update(&self, work: Work) -> Result<i32> {
+        self.update_with(&*self.write_pool, work).await
     }
 
     #[instrument(name = "delete_work", skip(self), fields(work.id = %id))]
-    async fn delete(&self, id: i32) -> Result<()> {
-        let result = sqlx::query!(
-            r#"
-            DELETE FROM works
-            WHERE id = $1
-            "#,
-            id
-        )
-        .execute(self.write_pool.as_ref())
-        .await?;
-
-        if result.rows_affected() == 0 {
-            return Err(DalError::InvalidInput {
-                message: format!("Work not found: {id}"),
-            });
-        }
-
-        Ok(())
+    pub async fn delete(&self, id: Uuid) -> Result<()> {
+        self.delete_with(&*self.write_pool, id).await
     }
 
     #[instrument(
@@ -365,57 +267,13 @@ impl WorkRepository for WorkRepositoryImpl {
         skip(self, assoc),
         fields(work.id = %assoc.work_id, author.id = %assoc.author_id)
     )]
-    async fn add_author(&self, assoc: WorkAuthorCreateInput) -> Result<()> {
-        // Default values if not provided
-        let role = assoc.role.unwrap_or_else(|| "Author".to_string());
-        let primary_author = assoc.primary_author.unwrap_or(false);
-        let ord = assoc.ord;
-
-        // Upsert association so repeated calls update metadata rather than error
-        sqlx::query!(
-            r#"
-            INSERT INTO work_authors (work_id, author_id, role, primary_author, ord)
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (work_id, author_id) DO UPDATE
-            SET role = EXCLUDED.role,
-                primary_author = EXCLUDED.primary_author,
-                ord = EXCLUDED.ord
-            "#,
-            assoc.work_id,
-            assoc.author_id,
-            role,
-            primary_author,
-            ord
-        )
-        .execute(self.write_pool.as_ref())
-        .await?;
-
-        Ok(())
+    pub async fn add_author(&self, assoc: WorkAuthorCreateInput) -> Result<()> {
+        self.add_author_with(&*self.write_pool, assoc).await
     }
 
     #[instrument(name = "list_authors_for_work", skip(self), fields(work.id = %work_id))]
-    async fn list_authors(&self, work_id: i32) -> Result<Vec<WorkAuthor>> {
-        let rows = sqlx::query_as!(
-            WorkAuthor,
-            r#"
-            SELECT
-                work_id,
-                author_id,
-                role,
-                primary_author,
-                ord,
-                created_at,
-                updated_at
-            FROM work_authors
-            WHERE work_id = $1
-            ORDER BY ord NULLS LAST, created_at, author_id
-            "#,
-            work_id
-        )
-        .fetch_all(self.read_pool.as_ref())
-        .await?;
-
-        Ok(rows)
+    pub async fn list_authors(&self, work_id: Uuid) -> Result<Vec<WorkAuthor>> {
+        self.list_authors_with(&*self.read_pool, work_id).await
     }
 }
 
@@ -436,7 +294,7 @@ mod tests {
         };
 
         let id = repo.create(input).await.unwrap();
-        assert!(id > 0);
+        assert!(!id.is_nil());
 
         let found = repo.find_by_id(id).await.unwrap();
         assert!(found.is_some());

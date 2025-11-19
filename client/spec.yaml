@@ -13,9 +13,40 @@ paths:
       operationId: getAllBooks
       tags:
         - Books
+      parameters:
+        - in: query
+          name: limit
+          description: Maximum number of books to return (default 100, max 500)
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+        - in: query
+          name: offset
+          description: Number of books to skip before returning results
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
       responses:
         '200':
           description: A list of books
+          headers:
+            x-pagination-limit:
+              description: Sanitized limit that was applied
+              schema:
+                type: integer
+            x-pagination-offset:
+              description: Offset supplied for the returned page
+              schema:
+                type: integer
+            x-pagination-next-offset:
+              description: Offset to request the next page
+              schema:
+                type: integer
           content:
             application/json:
               schema:
@@ -43,8 +74,8 @@ paths:
           content:
             text/plain:
               schema:
-                type: integer
-                format: int32
+                type: string
+                format: uuid
         '422':
           description: Validation error
   /books/{id}:
@@ -58,8 +89,8 @@ paths:
           in: path
           required: true
           schema:
-            type: integer
-            format: int32
+            type: string
+            format: uuid
           description: ID of the book
       responses:
         '200':
@@ -80,8 +111,8 @@ paths:
           in: path
           required: true
           schema:
-            type: integer
-            format: int32
+            type: string
+            format: uuid
           description: ID of the book
       requestBody:
         description: Data to update the book
@@ -110,8 +141,8 @@ paths:
           in: path
           required: true
           schema:
-            type: integer
-            format: int32
+            type: string
+            format: uuid
           description: ID of the book
       responses:
         '200':
@@ -160,16 +191,16 @@ components:
         - status
       properties:
         id:
-          type: integer
-          format: int32
+          type: string
+          format: uuid
         work_id:
-          type: integer
-          format: int32
+          type: string
+          format: uuid
         work_title:
           type: string
         primary_author_id:
-          type: integer
-          format: int32
+          type: string
+          format: uuid
         primary_author_name:
           type: string
         status:
@@ -185,8 +216,8 @@ components:
         primary_author_name:
           type: string
         primary_author_id:
-          type: integer
-          format: int32
+          type: string
+          format: uuid
         status:
           type: string
           enum: [Available, Borrowed, Lost]
@@ -199,8 +230,8 @@ components:
         - rank
       properties:
         work_id:
-          type: integer
-          format: int32
+          type: string
+          format: uuid
         work_title:
           type: string
         primary_author_name:
@@ -210,3 +241,52 @@ components:
           format: float
         headline:
           type: string
+  /books/id_list:
+    get:
+      summary: Get book IDs
+      operationId: getBookIds
+      tags:
+        - Books
+      parameters:
+        - in: query
+          name: limit
+          description: Maximum number of book IDs to return (default 100, max 500)
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+        - in: query
+          name: offset
+          description: Number of IDs to skip before returning results
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: A list of book IDs
+          headers:
+            x-pagination-limit:
+              description: Sanitized limit that was applied
+              schema:
+                type: integer
+            x-pagination-offset:
+              description: Offset supplied for the returned page
+              schema:
+                type: integer
+            x-pagination-next-offset:
+              description: Offset to request the next page
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                  format: uuid
+        '503':
+          description: Service unavailable

@@ -1,7 +1,8 @@
 use anyhow::Result;
-use bookapp_dal::{BookFilterParams, BookRepository, BookRepositoryImpl};
+use bookapp_dal::{BookFilterParams, BookRepositoryImpl};
 use std::sync::Arc;
 use tracing::{info, instrument};
+use uuid::Uuid;
 
 /// Service for enriching book data with additional metadata
 pub struct BookEnrichmentService {
@@ -35,8 +36,8 @@ impl BookEnrichmentService {
     }
 
     /// Enriches a single book with external metadata
-    #[instrument(skip(self), fields(book_id))]
-    async fn enrich_single_book(&self, book_id: i32) -> Result<()> {
+    #[instrument(skip(self), fields(book_id = %book_id))]
+    async fn enrich_single_book(&self, book_id: Uuid) -> Result<()> {
         // Simulate fetching enrichment data from external APIs
         // In a real application, this might fetch:
         // - Book cover images
@@ -46,7 +47,7 @@ impl BookEnrichmentService {
         // - Genre classifications
         // - Library availability
 
-        info!(book_id = book_id, "Enriching book with external metadata");
+        info!(book_id = %book_id, "Enriching book with external metadata");
 
         // Simulate API call delay
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -55,7 +56,7 @@ impl BookEnrichmentService {
         // let enriched_data = fetch_book_metadata(book_id).await?;
         // self.repository.update_metadata(book_id, enriched_data).await?;
 
-        info!(book_id = book_id, "Successfully enriched book");
+        info!(book_id = %book_id, "Successfully enriched book");
         Ok(())
     }
 

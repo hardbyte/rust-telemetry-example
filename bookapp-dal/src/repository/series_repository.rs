@@ -2,11 +2,10 @@ use crate::error::{DalError, Result};
 use crate::models::{
     Series, SeriesCreateInput, SeriesWorksAssociation, SeriesWorksAssociationCreateInput,
 };
-use crate::repository::traits::SeriesRepository;
-use async_trait::async_trait;
 use sqlx::{Executor, PgPool, Postgres};
 use std::sync::Arc;
 use tracing::{debug, instrument};
+use uuid::Uuid;
 
 pub struct SeriesRepositoryImpl {
     write_pool: Arc<PgPool>,
@@ -33,7 +32,7 @@ impl SeriesRepositoryImpl {
     // Executor-aware variants for transactional use
 
     #[instrument(name = "create_series_with", skip_all, fields(series.name = %input.name))]
-    pub async fn create_with<'e, E>(&self, exec: E, input: SeriesCreateInput) -> Result<i32>
+    pub async fn create_with<'e, E>(&self, exec: E, input: SeriesCreateInput) -> Result<Uuid>
     where
         E: Executor<'e, Database = Postgres>,
     {
@@ -53,7 +52,7 @@ impl SeriesRepositoryImpl {
     }
 
     #[instrument(name = "find_series_by_id_with", skip_all, fields(series.id = %id))]
-    pub async fn find_by_id_with<'e, E>(&self, exec: E, id: i32) -> Result<Option<Series>>
+    pub async fn find_by_id_with<'e, E>(&self, exec: E, id: Uuid) -> Result<Option<Series>>
     where
         E: Executor<'e, Database = Postgres>,
     {
@@ -103,7 +102,7 @@ impl SeriesRepositoryImpl {
     }
 
     #[instrument(name = "delete_series_with", skip_all, fields(series.id = %id))]
-    pub async fn delete_with<'e, E>(&self, exec: E, id: i32) -> Result<()>
+    pub async fn delete_with<'e, E>(&self, exec: E, id: Uuid) -> Result<()>
     where
         E: Executor<'e, Database = Postgres>,
     {
@@ -165,7 +164,7 @@ impl SeriesRepositoryImpl {
     pub async fn list_works_with<'e, E>(
         &self,
         exec: E,
-        series_id: i32,
+        series_id: Uuid,
     ) -> Result<Vec<SeriesWorksAssociation>>
     where
         E: Executor<'e, Database = Postgres>,
@@ -197,7 +196,12 @@ impl SeriesRepositoryImpl {
         skip_all,
         fields(series.id = %series_id, work.id = %work_id)
     )]
-    pub async fn remove_work_with<'e, E>(&self, exec: E, series_id: i32, work_id: i32) -> Result<()>
+    pub async fn remove_work_with<'e, E>(
+        &self,
+        exec: E,
+        series_id: Uuid,
+        work_id: Uuid,
+    ) -> Result<()>
     where
         E: Executor<'e, Database = Postgres>,
     {
@@ -220,90 +224,25 @@ impl SeriesRepositoryImpl {
 
         Ok(())
     }
-}
 
-#[async_trait]
-impl SeriesRepository for SeriesRepositoryImpl {
     #[instrument(name = "create_series", skip(self, input), fields(series.name = %input.name))]
-    async fn create(&self, input: SeriesCreateInput) -> Result<i32> {
-        let row = sqlx::query!(
-            r#"
-            INSERT INTO series (name, description)
-            VALUES ($1, $2)
-            RETURNING id
-            "#,
-            input.name,
-            input.description
-        )
-        .fetch_one(self.write_pool.as_ref())
-        .await?;
-
-        Ok(row.id)
+    pub async fn create(&self, input: SeriesCreateInput) -> Result<Uuid> {
+        self.create_with(&*self.write_pool, input).await
     }
 
     #[instrument(name = "find_series_by_id", skip(self), fields(series.id = %id))]
-    async fn find_by_id(&self, id: i32) -> Result<Option<Series>> {
-        let series = sqlx::query_as!(
-            Series,
-            r#"
-            SELECT
-                id,
-                name,
-                description,
-                created_at,
-                updated_at
-            FROM series
-            WHERE id = $1
-            "#,
-            id
-        )
-        .fetch_optional(self.read_pool.as_ref())
-        .await?;
-
-        Ok(series)
+    pub async fn find_by_id(&self, id: Uuid) -> Result<Option<Series>> {
+        self.find_by_id_with(&*self.read_pool, id).await
     }
 
     #[instrument(name = "find_all_series", skip(self))]
-    async fn find_all(&self) -> Result<Vec<Series>> {
-        debug!("Fetching all series");
-        let rows = sqlx::query_as!(
-            Series,
-            r#"
-            SELECT
-                id,
-                name,
-                description,
-                created_at,
-                updated_at
-            FROM series
-            ORDER BY name, id
-            "#
-        )
-        .fetch_all(self.read_pool.as_ref())
-        .await?;
-
-        Ok(rows)
+    pub async fn find_all(&self) -> Result<Vec<Series>> {
+        self.find_all_with(&*self.read_pool).await
     }
 
     #[instrument(name = "delete_series", skip(self), fields(series.id = %id))]
-    async fn delete(&self, id: i32) -> Result<()> {
-        let result = sqlx::query!(
-            r#"
-            DELETE FROM series
-            WHERE id = $1
-            "#,
-            id
-        )
-        .execute(self.write_pool.as_ref())
-        .await?;
-
-        if result.rows_affected() == 0 {
-            return Err(DalError::InvalidInput {
-                message: format!("Series not found: {id}"),
-            });
-        }
-
-        Ok(())
+    pub async fn delete(&self, id: Uuid) -> Result<()> {
+        self.delete_with(&*self.write_pool, id).await
     }
 
     #[instrument(
@@ -311,53 +250,13 @@ impl SeriesRepository for SeriesRepositoryImpl {
         skip(self, assoc),
         fields(series.id = %assoc.series_id, work.id = %assoc.work_id)
     )]
-    async fn add_work(&self, assoc: SeriesWorksAssociationCreateInput) -> Result<()> {
-        // Default values if not provided
-        let primary_work = assoc.primary_work.unwrap_or(true);
-        let order_id = assoc.order_id;
-
-        // Upsert so repeats update metadata instead of erroring
-        sqlx::query!(
-            r#"
-            INSERT INTO series_works_association (series_id, work_id, primary_work, order_id)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (series_id, work_id) DO UPDATE
-            SET primary_work = EXCLUDED.primary_work,
-                order_id = EXCLUDED.order_id
-            "#,
-            assoc.series_id,
-            assoc.work_id,
-            primary_work,
-            order_id
-        )
-        .execute(self.write_pool.as_ref())
-        .await?;
-
-        Ok(())
+    pub async fn add_work(&self, assoc: SeriesWorksAssociationCreateInput) -> Result<()> {
+        self.add_work_with(&*self.write_pool, assoc).await
     }
 
     #[instrument(name = "list_works_for_series", skip(self), fields(series.id = %series_id))]
-    async fn list_works(&self, series_id: i32) -> Result<Vec<SeriesWorksAssociation>> {
-        let rows = sqlx::query_as!(
-            SeriesWorksAssociation,
-            r#"
-            SELECT
-                series_id,
-                work_id,
-                primary_work,
-                order_id,
-                created_at,
-                updated_at
-            FROM series_works_association
-            WHERE series_id = $1
-            ORDER BY order_id NULLS LAST, work_id
-            "#,
-            series_id
-        )
-        .fetch_all(self.read_pool.as_ref())
-        .await?;
-
-        Ok(rows)
+    pub async fn list_works(&self, series_id: Uuid) -> Result<Vec<SeriesWorksAssociation>> {
+        self.list_works_with(&*self.read_pool, series_id).await
     }
 
     #[instrument(
@@ -365,25 +264,9 @@ impl SeriesRepository for SeriesRepositoryImpl {
         skip(self),
         fields(series.id = %series_id, work.id = %work_id)
     )]
-    async fn remove_work(&self, series_id: i32, work_id: i32) -> Result<()> {
-        let result = sqlx::query!(
-            r#"
-            DELETE FROM series_works_association
-            WHERE series_id = $1 AND work_id = $2
-            "#,
-            series_id,
-            work_id
-        )
-        .execute(self.write_pool.as_ref())
-        .await?;
-
-        if result.rows_affected() == 0 {
-            return Err(DalError::InvalidInput {
-                message: format!("Association not found: series_id={series_id}, work_id={work_id}"),
-            });
-        }
-
-        Ok(())
+    pub async fn remove_work(&self, series_id: Uuid, work_id: Uuid) -> Result<()> {
+        self.remove_work_with(&*self.write_pool, series_id, work_id)
+            .await
     }
 }
 
@@ -392,7 +275,7 @@ mod tests {
     use super::*;
     use sqlx::PgPool;
 
-    async fn insert_work(pool: &PgPool, title: &str) -> i32 {
+    async fn insert_work(pool: &PgPool, title: &str) -> Uuid {
         let row = sqlx::query!(
             r#"
             INSERT INTO works (title)
@@ -419,7 +302,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(id > 0);
+        assert!(!id.is_nil());
 
         let s = repo.find_by_id(id).await.unwrap().unwrap();
         assert_eq!(s.id, id);
@@ -553,14 +436,14 @@ mod tests {
     #[sqlx::test]
     async fn test_delete_nonexistent_series(pool: PgPool) {
         let repo = SeriesRepositoryImpl::single_pool(Arc::new(pool));
-        let res = repo.delete(9_999_999).await;
+        let res = repo.delete(Uuid::nil()).await;
         assert!(res.is_err());
     }
 
     #[sqlx::test]
     async fn test_remove_nonexistent_association(pool: PgPool) {
         let repo = SeriesRepositoryImpl::single_pool(Arc::new(pool));
-        let res = repo.remove_work(123456, 654321).await;
+        let res = repo.remove_work(Uuid::nil(), Uuid::nil()).await;
         assert!(res.is_err());
     }
 }

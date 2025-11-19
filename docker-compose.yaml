@@ -12,6 +12,8 @@ services:
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_ENVIRONMENT: "development"
       SENTRY_RELEASE: "bookapp@1.0.0"
+      DATABASE_POOL_MAX_CONNECTIONS: "48"
+      DATABASE_POOL_MIN_CONNECTIONS: "12"
     ports:
       - "8000"
       - "6669"
@@ -65,6 +67,8 @@ services:
 
   db:
     image: postgres:17
+    command:
+      ["postgres", "-c", "max_connections=300", "-c", "shared_buffers=256MB"]
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password

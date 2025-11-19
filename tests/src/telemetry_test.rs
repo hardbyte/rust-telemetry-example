@@ -624,12 +624,7 @@ async fn test_error_endpoint_generates_error_trace() -> TestResult<()> {
     let http_client = HttpClient::new();
 
     // Configure error injection against a unique, numeric path so the handler executes
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-    let numeric_id = (timestamp % (i32::MAX as u128)) as i32;
-    let test_endpoint = format!("/books/{numeric_id}");
+    let test_endpoint = format!("/books/{}", uuid::Uuid::now_v7());
     let error_injection_config = serde_json::json!({
         "endpoint_pattern": test_endpoint.clone(),
         "http_method": "GET",

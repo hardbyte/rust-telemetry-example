@@ -1,7 +1,5 @@
 use crate::error::Result;
 use crate::models::{Event, EventCreateInput};
-use crate::repository::traits::EventRepository;
-use async_trait::async_trait;
 use sqlx::{Executor, PgPool, Postgres};
 use std::sync::Arc;
 use tracing::{instrument, Level};
@@ -296,27 +294,24 @@ impl EventRepositoryImpl {
         .await?;
         Ok(res.rows_affected())
     }
-}
 
-#[async_trait]
-impl EventRepository for EventRepositoryImpl {
     #[instrument(
         name = "events.append",
-        skip_all,
+        skip(self, input),
         level = Level::DEBUG,
         fields(aggregate_type = %input.aggregate_type, aggregate_id = %input.aggregate_id, event_type = %input.event_type)
     )]
-    async fn append(&self, input: EventCreateInput) -> Result<i64> {
+    pub async fn append(&self, input: EventCreateInput) -> Result<i64> {
         self.append_with(&*self.write_pool, input).await
     }
 
     #[instrument(
         name = "events.list_for_aggregate",
-        skip_all,
+        skip(self),
         level = Level::DEBUG,
         fields(aggregate_type = %aggregate_type, aggregate_id = %aggregate_id)
     )]
-    async fn list_for_aggregate(
+    pub async fn list_for_aggregate(
         &self,
         aggregate_type: &str,
         aggregate_id: &str,
@@ -327,12 +322,23 @@ impl EventRepository for EventRepositoryImpl {
 
     #[instrument(
         name = "events.list_by_type",
-        skip_all,
+        skip(self),
         level = Level::DEBUG,
         fields(event_type = %event_type, limit = limit)
     )]
-    async fn list_by_type(&self, event_type: &str, limit: i64) -> Result<Vec<Event>> {
+    pub async fn list_by_type(&self, event_type: &str, limit: i64) -> Result<Vec<Event>> {
         self.list_by_type_with(&*self.read_pool, event_type, limit)
+            .await
+    }
+
+    #[instrument(
+        name = "events.list_unpublished",
+        skip(self),
+        level = Level::DEBUG,
+        fields(topic = ?topic, limit = limit)
+    )]
+    pub async fn list_unpublished(&self, topic: Option<&str>, limit: i64) -> Result<Vec<Event>> {
+        self.list_unpublished_with(&*self.read_pool, topic, limit)
             .await
     }
 }

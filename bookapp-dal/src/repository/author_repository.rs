@@ -1,10 +1,9 @@
 use crate::error::{DalError, Result};
 use crate::models::{Author, AuthorCreateInput};
-use crate::repository::traits::AuthorRepository;
-use async_trait::async_trait;
 use sqlx::{Executor, PgPool, Postgres};
 use std::sync::Arc;
 use tracing::{debug, instrument, warn};
+use uuid::Uuid;
 
 pub struct AuthorRepositoryImpl {
     write_pool: Arc<PgPool>,
@@ -35,7 +34,7 @@ impl AuthorRepositoryImpl {
         skip_all,
         fields(author.name = %input.name)
     )]
-    pub async fn create_with<'e, E>(&self, exec: E, input: AuthorCreateInput) -> Result<i32>
+    pub async fn create_with<'e, E>(&self, exec: E, input: AuthorCreateInput) -> Result<Uuid>
     where
         E: Executor<'e, Database = Postgres>,
     {
@@ -55,7 +54,7 @@ impl AuthorRepositoryImpl {
     }
 
     #[instrument(name = "find_author_by_id_with", skip_all, fields(author.id = %id))]
-    pub async fn find_by_id_with<'e, E>(&self, exec: E, id: i32) -> Result<Option<Author>>
+    pub async fn find_by_id_with<'e, E>(&self, exec: E, id: Uuid) -> Result<Option<Author>>
     where
         E: Executor<'e, Database = Postgres>,
     {
@@ -139,7 +138,7 @@ impl AuthorRepositoryImpl {
     }
 
     #[instrument(name = "delete_author_with", skip_all, fields(author.id = %id))]
-    pub async fn delete_with<'e, E>(&self, exec: E, id: i32) -> Result<()>
+    pub async fn delete_with<'e, E>(&self, exec: E, id: Uuid) -> Result<()>
     where
         E: Executor<'e, Database = Postgres>,
     {
@@ -161,117 +160,29 @@ impl AuthorRepositoryImpl {
 
         Ok(())
     }
-}
-
-#[async_trait]
-impl AuthorRepository for AuthorRepositoryImpl {
     #[instrument(name = "create_author", skip(self, input), fields(author.name = %input.name))]
-    async fn create(&self, input: AuthorCreateInput) -> Result<i32> {
-        let row = sqlx::query!(
-            r#"
-            INSERT INTO authors (name, sort_name)
-            VALUES ($1, $2)
-            RETURNING id
-            "#,
-            input.name,
-            input.sort_name
-        )
-        .fetch_one(self.write_pool.as_ref())
-        .await?;
-
-        Ok(row.id)
+    pub async fn create(&self, input: AuthorCreateInput) -> Result<Uuid> {
+        self.create_with(&*self.write_pool, input).await
     }
 
     #[instrument(name = "find_author_by_id", skip(self), fields(author.id = %id))]
-    async fn find_by_id(&self, id: i32) -> Result<Option<Author>> {
-        let author = sqlx::query_as!(
-            Author,
-            r#"
-            SELECT
-                id,
-                name,
-                sort_name,
-                created_at,
-                updated_at
-            FROM authors
-            WHERE id = $1
-            "#,
-            id
-        )
-        .fetch_optional(self.read_pool.as_ref())
-        .await?;
-
-        Ok(author)
+    pub async fn find_by_id(&self, id: Uuid) -> Result<Option<Author>> {
+        self.find_by_id_with(&*self.read_pool, id).await
     }
 
     #[instrument(name = "find_all_authors", skip(self))]
-    async fn find_all(&self) -> Result<Vec<Author>> {
-        debug!("Fetching all authors");
-        let authors = sqlx::query_as!(
-            Author,
-            r#"
-            SELECT
-                id,
-                name,
-                sort_name,
-                created_at,
-                updated_at
-            FROM authors
-            ORDER BY sort_name NULLS LAST, name, id
-            "#
-        )
-        .fetch_all(self.read_pool.as_ref())
-        .await?;
-
-        Ok(authors)
+    pub async fn find_all(&self) -> Result<Vec<Author>> {
+        self.find_all_with(&*self.read_pool).await
     }
 
     #[instrument(name = "update_author", skip(self), fields(author.id = %author.id, author.name = %author.name))]
-    async fn update(&self, author: Author) -> Result<i32> {
-        let result = sqlx::query!(
-            r#"
-            UPDATE authors
-            SET
-                name = $2,
-                sort_name = $3
-            WHERE id = $1
-            "#,
-            author.id,
-            author.name,
-            author.sort_name
-        )
-        .execute(self.write_pool.as_ref())
-        .await?;
-
-        let rows_affected: i32 = result.rows_affected().try_into().unwrap_or(0);
-        if rows_affected == 0 {
-            warn!("Update affected 0 rows - author may not exist");
-        } else {
-            debug!("Successfully updated author");
-        }
-
-        Ok(rows_affected)
+    pub async fn update(&self, author: Author) -> Result<i32> {
+        self.update_with(&*self.write_pool, author).await
     }
 
     #[instrument(name = "delete_author", skip(self), fields(author.id = %id))]
-    async fn delete(&self, id: i32) -> Result<()> {
-        let result = sqlx::query!(
-            r#"
-            DELETE FROM authors
-            WHERE id = $1
-            "#,
-            id
-        )
-        .execute(self.write_pool.as_ref())
-        .await?;
-
-        if result.rows_affected() == 0 {
-            return Err(DalError::InvalidInput {
-                message: format!("Author not found: {id}"),
-            });
-        }
-
-        Ok(())
+    pub async fn delete(&self, id: Uuid) -> Result<()> {
+        self.delete_with(&*self.write_pool, id).await
     }
 }
 
@@ -290,7 +201,7 @@ mod tests {
         };
 
         let author_id = repo.create(input).await.unwrap();
-        assert!(author_id > 0);
+        assert!(!author_id.is_nil());
 
         let found = repo.find_by_id(author_id).await.unwrap();
         assert!(found.is_some());
@@ -378,7 +289,7 @@ mod tests {
     #[sqlx::test]
     async fn test_delete_nonexistent_author(pool: PgPool) {
         let repo = AuthorRepositoryImpl::single_pool(Arc::new(pool));
-        let res = repo.delete(999_999).await;
+        let res = repo.delete(Uuid::nil()).await;
         assert!(res.is_err());
     }
 }

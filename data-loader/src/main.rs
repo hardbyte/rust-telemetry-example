@@ -1,13 +1,14 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use client::{types::BookCreateIn, Client as BookappClient, ClientState};
 use opentelemetry::{trace::TracerProvider, KeyValue};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use rand::prelude::IndexedRandom;
-use std::time::Duration;
+use std::{fmt, time::Duration};
 use tracing::{error, info, warn};
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Registry};
+use uuid::Uuid;
 
 /// Bulk load books via the bookapp API using the Progenitor client
 #[derive(Parser, Debug)]
@@ -26,6 +27,10 @@ struct Args {
     #[arg(short, long, default_value = "50")]
     delay_ms: u64,
 
+    /// Dataset used when generating book payloads
+    #[arg(long, value_enum, default_value = "random")]
+    dataset: DatasetMode,
+
     /// Number of concurrent workers
     #[arg(short, long, default_value = "5")]
     workers: usize,
@@ -33,6 +38,21 @@ struct Args {
     /// OTLP endpoint for tracing
     #[arg(long, default_value = "http://localhost:4317")]
     otlp_endpoint: String,
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+enum DatasetMode {
+    Random,
+    Curated,
+}
+
+impl fmt::Display for DatasetMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DatasetMode::Random => write!(f, "random"),
+            DatasetMode::Curated => write!(f, "curated"),
+        }
+    }
 }
 
 static SAMPLE_AUTHORS: &[&str] = &[
@@ -81,6 +101,21 @@ static SAMPLE_TITLES: &[&str] = &[
     "Sunrise Over Tomorrow",
 ];
 
+static CURATED_BOOKS: &[(&str, &str)] = &[
+    ("The Rust Programming Language", "Steve Klabnik"),
+    ("Programming Rust", "Jim Blandy"),
+    ("Zero To Production In Rust", "Luca Palmieri"),
+    ("Rust for Rustaceans", "Jon Gjengset"),
+    ("Effective Rust", "David Herman"),
+    ("Clean Code", "Robert C. Martin"),
+    ("Designing Data-Intensive Applications", "Martin Kleppmann"),
+    ("Distributed Systems with Rust", "Abhishek Chanda"),
+    ("Hands-On Concurrency with Rust", "Brian L. Troutwine"),
+    ("Site Reliability Engineering", "Betsy Beyer"),
+    ("Production-Ready Microservices", "Susan Fowler"),
+    ("Chaos Engineering", "Casey Rosenthal"),
+];
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let args = Args::parse();
@@ -94,6 +129,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     );
     info!("📡 Target service: {}", args.app_url);
     info!("⏱️ Delay between requests: {}ms", args.delay_ms);
+    info!("📚 Dataset mode: {}", args.dataset);
 
     // Create Progenitor client with OpenTelemetry context injection built-in
     let client_state = ClientState::default();
@@ -105,9 +141,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // test_connectivity(&_bookapp_client).await?;
     info!("⏩ Skipping connectivity test for now...");
 
-    // Generate sample books
-    let books = generate_sample_books(args.count);
-    info!("📚 Generated {} sample books for ingestion", books.len());
+    let books = generate_books(args.count, &args.dataset);
+    info!("📚 Prepared {} books for ingestion", books.len());
 
     // Create books using concurrent workers
     let workers = args.workers.max(1);
@@ -229,7 +264,14 @@ async fn test_connectivity(
     }
 }
 
-fn generate_sample_books(count: usize) -> Vec<BookCreateIn> {
+fn generate_books(count: usize, mode: &DatasetMode) -> Vec<BookCreateIn> {
+    match mode {
+        DatasetMode::Random => generate_random_books(count),
+        DatasetMode::Curated => generate_curated_books(count),
+    }
+}
+
+fn generate_random_books(count: usize) -> Vec<BookCreateIn> {
     let mut rng = rand::rng();
     let mut books = Vec::with_capacity(count);
 
@@ -245,6 +287,28 @@ fn generate_sample_books(count: usize) -> Vec<BookCreateIn> {
         books.push(BookCreateIn {
             work_title: title,
             primary_author_name: Some(author),
+            primary_author_id: None,
+            status: None,
+        });
+    }
+
+    books
+}
+
+fn generate_curated_books(count: usize) -> Vec<BookCreateIn> {
+    let mut books = Vec::with_capacity(count);
+
+    for i in 0..count {
+        let (title, author) = CURATED_BOOKS[i % CURATED_BOOKS.len()];
+        let title = if count > CURATED_BOOKS.len() {
+            format!("{title} ({})", (i / CURATED_BOOKS.len()) + 1)
+        } else {
+            title.to_string()
+        };
+
+        books.push(BookCreateIn {
+            work_title: title,
+            primary_author_name: Some(author.to_string()),
             primary_author_id: None,
             status: None,
         });
@@ -305,7 +369,7 @@ async fn process_books_worker(
 async fn create_book_request(
     client: &BookappClient,
     book: BookCreateIn,
-) -> Result<i32, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<Uuid, Box<dyn std::error::Error + Send + Sync>> {
     let response = client.create_book().body(book).send().await?;
 
     if !response.status().is_success() {
@@ -319,6 +383,6 @@ async fn create_book_request(
         bytes.extend_from_slice(&chunk?);
     }
     let response_text = String::from_utf8(bytes)?;
-    let book_id: i32 = response_text.parse()?;
+    let book_id: Uuid = response_text.trim().parse()?;
     Ok(book_id)
 }

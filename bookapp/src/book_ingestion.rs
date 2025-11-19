@@ -8,10 +8,11 @@ use rdkafka::{
     producer::{FutureProducer, FutureRecord},
 };
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BookIngestionMessage {
-    pub(crate) book_id: i32,
+    pub(crate) book_id: Uuid,
     // other fields if necessary
 }
 

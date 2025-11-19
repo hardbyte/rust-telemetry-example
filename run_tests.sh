@@ -47,6 +47,22 @@ if ! command -v timeout >/dev/null 2>&1; then
   exit 1
 fi
 
+wait_for_db() {
+  local timeout_secs=$1
+  local interval_secs=${2:-2}
+  local deadline=$((SECONDS + timeout_secs))
+  echo "⏳ Waiting for Postgres readiness (${timeout_secs}s timeout)..."
+  while (( SECONDS < deadline )); do
+    if docker compose exec -T db pg_isready -U postgres >/dev/null 2>&1; then
+      echo "✅ Postgres is ready"
+      return 0
+    fi
+    sleep "$interval_secs"
+  done
+  echo "❌ Postgres failed to become ready within ${timeout_secs}s" >&2
+  exit 1
+}
+
 flush_pending_spans() {
   [[ $RUN_TESTS_OTEL_ENABLED -eq 1 ]] || return 0
   local record
@@ -226,10 +242,20 @@ if [[ -z "${DB_PORT}" ]]; then
 fi
 export DATABASE_URL="postgres://postgres:password@localhost:${DB_PORT}/bookapp"
 printenv DATABASE_URL | sed 's/.*/📡 &/'
+if [[ "${DATABASE_URL}" == *"?"* ]]; then
+  export ERROR_INJECTION_DATABASE_URL="${DATABASE_URL}&options=--search_path%3Derror_injection"
+else
+  export ERROR_INJECTION_DATABASE_URL="${DATABASE_URL}?options=--search_path%3Derror_injection"
+fi
+echo "📡 (error injection) ${ERROR_INJECTION_DATABASE_URL}"
+
+run_step "Ensure error_injection schema" 60 docker compose exec -T db psql -U postgres -d bookapp -c 'CREATE SCHEMA IF NOT EXISTS error_injection'
 
 if command -v sqlx >/dev/null 2>&1; then
-  run_step "Apply database migrations" 180 bash -lc 'cd bookapp-dal && sqlx migrate run'
-  run_step "Refresh SQLx metadata" 300 bash -lc 'cd bookapp-dal && cargo sqlx prepare -- --all-targets --all-features'
+run_step "Apply database migrations (bookapp-dal)" 180 bash -lc 'cd bookapp-dal && sqlx migrate run'
+run_step "Apply error injection migrations" 180 env DATABASE_URL="$ERROR_INJECTION_DATABASE_URL" bash -lc 'cd error-injection-dal && sqlx migrate run'
+run_step "Refresh SQLx metadata (bookapp-dal)" 300 bash -lc 'cd bookapp-dal && cargo sqlx prepare -- --all-targets --all-features'
+run_step "Refresh SQLx metadata (error-injection-dal)" 300 env DATABASE_URL="$ERROR_INJECTION_DATABASE_URL" bash -lc 'cd error-injection-dal && cargo sqlx prepare -- --all-targets --all-features'
 else
   echo "⚠️ sqlx CLI not found; skipping migrations and metadata refresh"
 fi
@@ -243,8 +269,49 @@ run_step "bookapp tests" 600 cargo test --package bookapp
 run_step "bookapp-dal tests" 600 cargo test --package bookapp-dal
 run_step "backend tests" 600 cargo test --package backend
 
+run_step "Build runtime images" 600 docker compose build app backend
+
 log_section "Service Stack"
-run_step "Start supporting services" 240 docker compose up -d --wait --wait-timeout 240 kafka telemetry app backend
+run_step "Start supporting services" 420 bash -lc '
+set -euo pipefail
+
+wait_for_service() {
+  local service=$1
+  local timeout_secs=$2
+  local deadline=$((SECONDS + timeout_secs))
+  echo "⏳ Waiting for ${service} to report healthy (${timeout_secs}s timeout)..."
+  while ((SECONDS < deadline)); do
+    local container_id
+    container_id=$(docker compose ps -q "$service" 2>/dev/null || true)
+    if [[ -z "$container_id" ]]; then
+      sleep 5
+      continue
+    fi
+    local status health
+    status=$(docker inspect -f "{{.State.Status}}" "$container_id" 2>/dev/null || echo "unknown")
+    health=$(docker inspect -f "{{if .State.Health}}{{.State.Health.Status}}{{end}}" "$container_id" 2>/dev/null)
+    if [[ "$status" == "running" && ( -z "$health" || "$health" == "healthy" ) ]]; then
+      echo "✅ ${service} ready (status=${status}, health=${health:-none})"
+      return 0
+    fi
+    if [[ "$status" == "exited" || "$status" == "dead" ]]; then
+      docker compose logs "$service" --tail=200 || true
+      echo "❌ ${service} exited before becoming healthy"
+      return 1
+    fi
+    sleep 5
+  done
+  docker compose logs "$service" --tail=200 || true
+  echo "❌ ${service} failed to become healthy within ${timeout_secs}s"
+  return 1
+}
+
+docker compose up -d kafka telemetry app backend || true
+wait_for_service kafka 240
+wait_for_service telemetry 240
+wait_for_service app 240
+wait_for_service backend 240
+'
 
 APP_PORT=$(docker compose port app 8000 2>/dev/null | head -n 1 | awk -F: '{print $2}' | tr -d '\r')
 GRAFANA_PORT=$(docker compose port telemetry 3000 2>/dev/null | head -n 1 | awk -F: '{print $2}' | tr -d '\r')

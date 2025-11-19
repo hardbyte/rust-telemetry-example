@@ -37,3 +37,5 @@ urlencoding = "2.1"
 rand = "0.9.1"
 chrono = "0.4"
 client = { path = "../client" }
+uuid = { workspace = true }
+futures = "0.3"

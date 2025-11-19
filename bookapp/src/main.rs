@@ -12,7 +12,7 @@ mod rest;
 mod rest_tests;
 mod topic_management;
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
 use axum::{Extension, Json, Router};
@@ -24,6 +24,7 @@ use serde_json::{json, Value};
 use tokio::signal::unix::{signal, SignalKind};
 
 use crate::database::DatabasePools;
+use error_injection_dal::ErrorInjectionRepository;
 
 use tracing::info;
 
@@ -36,17 +37,15 @@ async fn health() -> Json<Value> {
 
 fn router(db_pools: DatabasePools, producer: FutureProducer) -> Router {
     // Create the ErrorInjectionConfigStore with caching
-    let postgres_store = std::sync::Arc::new(
-        error_injection_middleware::PostgresErrorInjectionConfigStore::new(
-            db_pools.write_pool.clone(),
-        ),
-    )
-        as std::sync::Arc<dyn error_injection_middleware::ErrorInjectionConfigStore>;
+    let error_injection_repo =
+        ErrorInjectionRepository::new(db_pools.write_pool.clone(), db_pools.read_pool.clone());
+    let postgres_store = Arc::new(
+        error_injection_middleware::PostgresErrorInjectionConfigStore::new(error_injection_repo),
+    ) as Arc<dyn error_injection_middleware::ErrorInjectionConfigStore>;
 
-    let error_injection_store = std::sync::Arc::new(
-        error_injection_middleware::CachedErrorInjectionConfigStore::new(postgres_store),
-    )
-        as std::sync::Arc<dyn error_injection_middleware::ErrorInjectionConfigStore>;
+    let error_injection_store =
+        Arc::new(error_injection_middleware::CachedErrorInjectionConfigStore::new(postgres_store))
+            as Arc<dyn error_injection_middleware::ErrorInjectionConfigStore>;
 
     Router::new()
         .merge(rest::openapi_router())
@@ -140,13 +139,13 @@ async fn main() -> Result<()> {
     // Init db
     info!("Setting up Database");
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    // High-throughput database pool configuration
+    // High-throughput database pool configuration (env-overridable)
     let db_config = database::DatabaseConfig {
-        max_connections: 100, // Significantly increased for high throughput
-        min_connections: 20,  // Higher minimum to avoid cold start delays
-        acquire_timeout: Duration::from_secs(1), // Faster timeout for high throughput
-        idle_timeout: Duration::from_secs(30), // Reduced idle timeout
-        max_lifetime: Duration::from_secs(600), // Reduced lifetime for connection health
+        max_connections: env_u32("DATABASE_POOL_MAX_CONNECTIONS", 100),
+        min_connections: env_u32("DATABASE_POOL_MIN_CONNECTIONS", 20),
+        acquire_timeout: env_duration_millis("DATABASE_POOL_ACQUIRE_TIMEOUT_MS", 1_000),
+        idle_timeout: env_duration_secs("DATABASE_POOL_IDLE_TIMEOUT_SECS", 30),
+        max_lifetime: env_duration_secs("DATABASE_POOL_MAX_LIFETIME_SECS", 600),
     };
     let db_pools = DatabasePools::single(&db_url, Some(db_config)).await?;
 
@@ -244,4 +243,26 @@ async fn main() -> Result<()> {
     info!("Shutdown complete");
 
     Ok(())
+}
+
+fn env_u64(key: &str, default: u64) -> u64 {
+    std::env::var(key)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(default)
+}
+
+fn env_u32(key: &str, default: u32) -> u32 {
+    std::env::var(key)
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(default)
+}
+
+fn env_duration_secs(key: &str, default_secs: u64) -> Duration {
+    Duration::from_secs(env_u64(key, default_secs))
+}
+
+fn env_duration_millis(key: &str, default_ms: u64) -> Duration {
+    Duration::from_millis(env_u64(key, default_ms))
 }

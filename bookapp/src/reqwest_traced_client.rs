@@ -41,7 +41,7 @@ async fn fetch_some_books_in_parallel(http_client: ClientWithMiddleware, some_bo
     let futures = some_books.iter().take(5).map(|book| {
         let http_client = http_client.clone();
         async move {
-            tracing::debug!(id = book.id, "Getting one book from backend");
+            tracing::debug!(id = %book.id, "Getting one book from backend");
             let r = http_client
                 .get(format!("http://backend:8000/books/{}", book.id))
                 .send()

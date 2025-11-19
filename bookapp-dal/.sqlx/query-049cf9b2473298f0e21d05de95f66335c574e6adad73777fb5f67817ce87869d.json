@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                w.id\n            FROM works w\n            ORDER BY w.id\n            LIMIT $1\n            OFFSET $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "049cf9b2473298f0e21d05de95f66335c574e6adad73777fb5f67817ce87869d"
+}

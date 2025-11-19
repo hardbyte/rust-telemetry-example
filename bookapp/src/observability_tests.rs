@@ -10,7 +10,6 @@ mod observability_tests {
         Extension,
     };
     use bookapp_dal::models::{BookCreateInput, BookStatus};
-    use bookapp_dal::repository::traits::BookRepository;
     use bookapp_dal::repository::BookRepositoryImpl;
     use dotenv::dotenv;
     use rdkafka::producer::FutureProducer;

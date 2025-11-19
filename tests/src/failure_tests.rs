@@ -1,7 +1,6 @@
 use std::time::Duration;
 use tokio::time::timeout;
-
-
+use uuid::Uuid;
 
 /// Test API endpoint with invalid data
 #[tokio::test]
@@ -122,7 +121,7 @@ async fn test_concurrent_transactions() {
                     let mut tx = pool.begin().await?;
 
                     // Insert a work
-                    let work_id: i32 = sqlx::query_scalar!(
+                    let work_id: Uuid = sqlx::query_scalar!(
                         "INSERT INTO works (title) VALUES ($1) RETURNING id",
                         format!("Concurrent Work {}", i)
                     )
@@ -133,7 +132,7 @@ async fn test_concurrent_transactions() {
                     tokio::time::sleep(Duration::from_millis(10)).await;
 
                     tx.commit().await?;
-                    Ok::<i32, sqlx::Error>(work_id)
+                    Ok::<Uuid, sqlx::Error>(work_id)
                 })
             })
             .collect();

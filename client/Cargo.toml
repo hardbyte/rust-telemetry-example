@@ -17,6 +17,7 @@ serde_json = { version = "1.0.141" }
 opentelemetry = { workspace = true}
 tracing-opentelemetry = { workspace = true, features=["async-trait"] }
 progenitor-client = { version = "0.11" }
+uuid = { workspace = true }
 
 
 [build-dependencies]
