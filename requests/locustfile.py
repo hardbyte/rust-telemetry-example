@@ -228,7 +228,12 @@ class BookTasks(TaskSet):
                 span.set_attribute("operation.type", "get_book")
                 
                 # Make the GET request with the Accept header
-                with self.client.get(url, headers={"Accept": "application/json"}, catch_response=True) as response:
+                with self.client.get(
+                    url,
+                    name="/books/{id}",
+                    headers={"Accept": "application/json"},
+                    catch_response=True,
+                ) as response:
                     span.set_attribute("http.status_code", response.status_code)
                     if response.status_code == 200:
                         response.success()
@@ -243,7 +248,12 @@ class BookTasks(TaskSet):
                         )
         else:
             # Fallback without tracing
-            with self.client.get(url, headers={"Accept": "application/json"}, catch_response=True) as response:
+            with self.client.get(
+                url,
+                name="/books/{id}",
+                headers={"Accept": "application/json"},
+                catch_response=True,
+            ) as response:
                 if response.status_code == 200:
                     response.success()
                 elif response.status_code == 404:
@@ -427,7 +437,11 @@ class BookTasks(TaskSet):
                     span.set_attribute("http.url", url)
                     span.set_attribute("operation.type", "delete_book")
                     
-                    with self.client.delete(url, catch_response=True) as response:
+                    with self.client.delete(
+                        url,
+                        name="/books/{id}",
+                        catch_response=True,
+                    ) as response:
                         span.set_attribute("http.status_code", response.status_code)
                         if response.status_code in (200, 204):
                             self._evict_book_id(book_id)
@@ -444,7 +458,11 @@ class BookTasks(TaskSet):
                             )
             else:
                 # Fallback without tracing
-                with self.client.delete(url, catch_response=True) as response:
+                with self.client.delete(
+                    url,
+                    name="/books/{id}",
+                    catch_response=True,
+                ) as response:
                     if response.status_code in (200, 204):
                         self._evict_book_id(book_id)
                         response.success()
