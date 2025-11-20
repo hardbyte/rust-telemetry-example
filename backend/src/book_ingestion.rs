@@ -1,9 +1,7 @@
-use anyhow::Result;
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::watch;
-use tokio::time::sleep;
-use tracing::{debug, error, info, instrument, warn};
+use anyhow::{anyhow, Context, Result};
+use std::{future::Future, sync::Arc, time::Duration};
+use tokio::{sync::watch, time::sleep};
+use tracing::{debug, error, info, instrument, warn, Instrument};
 use uuid::Uuid;
 
 use rdkafka::producer::{FutureProducer, FutureRecord};
@@ -11,6 +9,10 @@ use rdkafka::Message;
 
 use bookapp_dal::repository::EventRepositoryImpl;
 use bookapp_dal::{Event, PgPool};
+
+const DLQ_MAX_ATTEMPTS: usize = 5;
+const DLQ_RETRY_DELAY_MS: u64 = 250;
+const PUBLISH_DELIVERY_TIMEOUT_MS: u64 = 250;
 
 /// Configuration for the outbox publisher worker
 #[derive(Clone, Debug)]
@@ -137,8 +139,8 @@ async fn publish_event(producer: &FutureProducer, topic: &str, event: &Event) ->
     // Simple record without headers for now - can add headers back later
     let rec = FutureRecord::to(topic).key(key).payload(&payload);
 
-    // Send with a timeout; backpressure via await
-    let delivery_timeout = Duration::from_secs(10);
+    // Send with a tight timeout to avoid holding DB locks while Kafka is slow
+    let delivery_timeout = Duration::from_millis(PUBLISH_DELIVERY_TIMEOUT_MS);
     match producer.send(rec, delivery_timeout).await {
         Ok(delivery) => {
             let (_partition, _offset) = delivery;
@@ -197,6 +199,11 @@ async fn background_process_new_book(
     search_refresher: Arc<SmartSearchRefresher>,
 ) -> Result<()> {
     info!(book_id = %book_id, "Starting background processing for new book");
+
+    book_repository
+        .upsert_search_index_for_work(book_id)
+        .await
+        .context("failed to update search index entry")?;
 
     // Notify the smart refresher and attempt a smart refresh
     search_refresher.notify_book_changed();
@@ -270,6 +277,8 @@ pub fn create_consumer() -> Result<StreamConsumer> {
 pub async fn run_consumer(
     book_repository: Arc<BookRepositoryImpl>,
     search_refresher: Arc<SmartSearchRefresher>,
+    dlq_producer: FutureProducer,
+    dlq_topic: String,
 ) -> Result<()> {
     let consumer = create_consumer()?;
 
@@ -281,14 +290,32 @@ pub async fn run_consumer(
         match consumer.recv().await {
             Err(e) => error!("Kafka error: {}", e),
             Ok(m) => {
-                let payload = match m.payload_view::<str>() {
-                    None => "",
-                    Some(Ok(s)) => s,
-                    Some(Err(e)) => {
+                let payload_bytes = match m.payload() {
+                    Some(bytes) => bytes.to_vec(),
+                    None => Vec::new(),
+                };
+
+                if payload_bytes.is_empty() {
+                    warn!("Received empty payload; committing offset to avoid poison pill");
+                    if let Err(e) = consumer.commit_message(&m, CommitMode::Async) {
+                        error!("Failed to commit offset for empty payload: {:?}", e);
+                    }
+                    continue;
+                }
+
+                let payload = match std::str::from_utf8(&payload_bytes) {
+                    Ok(s) => s.to_owned(),
+                    Err(e) => {
                         error!(
-                            error = format!("{e:#}"),
-                            "Error while deserializing payload"
+                            error = %e,
+                            "Failed to decode payload as UTF-8; routing to DLQ"
                         );
+                        send_to_dlq_with_retry(&dlq_producer, &dlq_topic, m.key(), &payload_bytes)
+                            .await
+                            .context("Failed to forward poison pill to DLQ")?;
+                        consumer
+                            .commit_message(&m, CommitMode::Async)
+                            .context("Failed to commit poison pill offset after DLQ send")?;
                         continue;
                     }
                 };
@@ -326,38 +353,34 @@ pub async fn run_consumer(
                 ];
                 span.add_link_with_attributes(linked_span_context, link_attributes);
 
-                let processing_result = span
+                let processing_result: Result<()> = span
                     .in_scope(|| async {
-                        // Deserialize and process the message
-                        if let Ok(book_message) =
-                            serde_json::from_str::<BookIngestionMessage>(payload)
-                        {
-                            info!(
-                                book_id = %book_message.book_id,
-                                partition = m.partition(),
-                                offset = m.offset(),
-                                "Processing book ingestion message in backend"
-                            );
+                        let book_message: BookIngestionMessage = serde_json::from_str(&payload)
+                            .context("Failed to deserialize message payload")?;
 
-                            // Process the message with the repository
-                            if let Err(e) = background_process_new_book(
-                                book_message.book_id,
-                                book_repository.clone(),
-                                search_refresher.clone(),
-                            )
-                            .await
-                            {
+                        info!(
+                            book_id = %book_message.book_id,
+                            partition = m.partition(),
+                            offset = m.offset(),
+                            "Processing book ingestion message in backend"
+                        );
+
+                        let parent_span = tracing::Span::current();
+                        let repo = book_repository.clone();
+                        let refresher = search_refresher.clone();
+                        let book_id = book_message.book_id;
+                        tokio::spawn(async move {
+                            let span = parent_span.clone();
+                            let fut = background_process_new_book(book_id, repo, refresher)
+                                .instrument(span);
+                            if let Err(e) = fut.await {
                                 error!(
-                                    book_id = %book_message.book_id,
+                                    book_id = %book_id,
                                     error = %e,
-                                    "Failed to process book ingestion message"
+                                    "Failed to process book ingestion message in background"
                                 );
-                                return Err(e);
                             }
-                        } else {
-                            error!("Failed to deserialize message payload");
-                            return Err(anyhow::anyhow!("Failed to deserialize message payload"));
-                        }
+                        });
                         Ok(())
                     })
                     .await;
@@ -365,19 +388,138 @@ pub async fn run_consumer(
                 // Commit the message offset only if processing succeeded
                 match processing_result {
                     Ok(()) => {
-                        if let Err(e) = consumer.commit_message(&m, CommitMode::Async) {
-                            error!("Failed to commit message offset: {:?}", e);
-                        }
+                        consumer
+                            .commit_message(&m, CommitMode::Async)
+                            .context("Failed to commit message offset")?;
                     }
                     Err(e) => {
-                        error!("Message processing failed, not committing offset: {:?}", e);
-                        // In a production system, you might want to:
-                        // - Send to a dead letter queue
-                        // - Retry with exponential backoff
-                        // - Alert monitoring systems
+                        error!(
+                            error = %e,
+                            "Message processing failed; forwarding to DLQ to avoid poison pill"
+                        );
+                        send_to_dlq_with_retry(&dlq_producer, &dlq_topic, m.key(), &payload_bytes)
+                            .await
+                            .context("Failed to forward poison pill to DLQ")?;
+                        consumer
+                            .commit_message(&m, CommitMode::Async)
+                            .context("Failed to commit poison pill offset after DLQ send")?;
                     }
                 }
             }
         }
+    }
+}
+
+async fn send_to_dlq(
+    producer: &FutureProducer,
+    topic: &str,
+    key: Option<&[u8]>,
+    payload: &[u8],
+) -> Result<()> {
+    let mut record = FutureRecord::to(topic).payload(payload);
+    if let Some(k) = key {
+        record = record.key(k);
+    }
+    match producer
+        .send(record, Duration::from_secs(5))
+        .await
+        .map(|_| ())
+    {
+        Ok(()) => Ok(()),
+        Err((e, _)) => Err(anyhow::anyhow!(e)),
+    }
+}
+
+async fn send_to_dlq_with_retry(
+    producer: &FutureProducer,
+    topic: &str,
+    key: Option<&[u8]>,
+    payload: &[u8],
+) -> Result<()> {
+    retry_with_backoff(
+        || send_to_dlq(producer, topic, key, payload),
+        DLQ_MAX_ATTEMPTS,
+        Duration::from_millis(DLQ_RETRY_DELAY_MS),
+    )
+    .await
+}
+
+async fn retry_with_backoff<F, Fut>(
+    mut operation: F,
+    attempts: usize,
+    delay: Duration,
+) -> Result<()>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<()>>,
+{
+    let mut last_error: Option<anyhow::Error> = None;
+    for attempt in 1..=attempts {
+        match operation().await {
+            Ok(()) => return Ok(()),
+            Err(err) => {
+                last_error = Some(err);
+                if attempt < attempts {
+                    sleep(delay).await;
+                }
+            }
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| anyhow!("operation exhausted retries")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    #[tokio::test]
+    async fn retry_with_backoff_succeeds_after_retries() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let ctx = counter.clone();
+        let result = retry_with_backoff(
+            move || {
+                let ctx = ctx.clone();
+                async move {
+                    let current = ctx.fetch_add(1, Ordering::SeqCst);
+                    if current < 2 {
+                        Err(anyhow!("boom"))
+                    } else {
+                        Ok(())
+                    }
+                }
+            },
+            5,
+            Duration::from_millis(0),
+        )
+        .await;
+
+        assert!(result.is_ok());
+        assert_eq!(counter.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn retry_with_backoff_propagates_last_error() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let ctx = counter.clone();
+        let result = retry_with_backoff(
+            move || {
+                let ctx = ctx.clone();
+                async move {
+                    ctx.fetch_add(1, Ordering::SeqCst);
+                    Err(anyhow!("always fails"))
+                }
+            },
+            3,
+            Duration::from_millis(0),
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(counter.load(Ordering::SeqCst), 3);
     }
 }

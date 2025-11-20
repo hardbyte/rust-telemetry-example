@@ -12,10 +12,20 @@ mod observability_tests {
     use bookapp_dal::models::{BookCreateInput, BookStatus};
     use bookapp_dal::repository::BookRepositoryImpl;
     use dotenv::dotenv;
+    use opentelemetry::{global, KeyValue};
+    use opentelemetry_sdk::{
+        metrics::{
+            data::{AggregatedMetrics, MetricData, ResourceMetrics},
+            InMemoryMetricExporter, PeriodicReader, SdkMeterProvider,
+        },
+        Resource,
+    };
     use rdkafka::producer::FutureProducer;
     use serde_json::Value;
     use sqlx::PgPool;
+    use std::collections::HashMap;
     use std::sync::Arc;
+    use std::time::Duration;
     use tower::ServiceExt;
 
     // Helper to setup observability test app with metrics collection
@@ -51,6 +61,95 @@ mod observability_tests {
         }
     }
 
+    struct MetricsHarness {
+        exporter: InMemoryMetricExporter,
+        provider: SdkMeterProvider,
+    }
+
+    impl MetricsHarness {
+        fn install() -> Self {
+            let exporter = InMemoryMetricExporter::default();
+            let reader = PeriodicReader::builder(exporter.clone())
+                .with_interval(Duration::from_millis(10))
+                .build();
+            let provider = SdkMeterProvider::builder()
+                .with_reader(reader)
+                .with_resource(
+                    Resource::builder()
+                        .with_attributes(vec![KeyValue::new(
+                            "service.name",
+                            "bookapp-observability-tests",
+                        )])
+                        .build(),
+                )
+                .build();
+            global::set_meter_provider(provider.clone());
+            exporter.reset();
+            Self { exporter, provider }
+        }
+
+        fn cache_counts(&self) -> HashMap<String, u64> {
+            self.metric_counts("book_search_cache_events_total", Some("cache.status"))
+        }
+
+        fn request_status_counts(&self) -> HashMap<String, u64> {
+            self.metric_counts("book_search_requests_total", Some("status"))
+        }
+
+        fn total_results(&self) -> u64 {
+            self.metric_counts("book_search_results_total", None)
+                .get("total")
+                .copied()
+                .unwrap_or(0)
+        }
+
+        fn metric_counts(&self, metric_name: &str, attr_key: Option<&str>) -> HashMap<String, u64> {
+            let _ = self.provider.force_flush();
+            let metrics = self.exporter.get_finished_metrics().unwrap_or_default();
+            collect_metric_counts(&metrics, metric_name, attr_key)
+        }
+    }
+
+    impl Drop for MetricsHarness {
+        fn drop(&mut self) {
+            let _ = self.provider.shutdown();
+            global::set_meter_provider(SdkMeterProvider::builder().build());
+        }
+    }
+
+    fn collect_metric_counts(
+        metrics: &[ResourceMetrics],
+        metric_name: &str,
+        attr_key: Option<&str>,
+    ) -> HashMap<String, u64> {
+        let mut counts = HashMap::new();
+        for rm in metrics {
+            for scope in rm.scope_metrics() {
+                for metric in scope.metrics() {
+                    if metric.name() == metric_name {
+                        if let AggregatedMetrics::U64(MetricData::Sum(sum)) = metric.data() {
+                            for data_point in sum.data_points() {
+                                let label = attr_key
+                                    .and_then(|key| {
+                                        data_point.attributes().find_map(|kv| {
+                                            if kv.key.as_str() == key {
+                                                Some(kv.value.to_string())
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                    })
+                                    .unwrap_or_else(|| "total".to_string());
+                                *counts.entry(label).or_insert(0) += data_point.value();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        counts
+    }
+
     #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_search_observability_tracing(pool: PgPool) {
         // Setup test data
@@ -61,13 +160,8 @@ mod observability_tests {
             primary_author_name: Some("Test Author".to_string()),
             status: Some(BookStatus::Available),
         };
-        repo.create(test_book).await.unwrap();
-
-        // Refresh materialized view
-        sqlx::query("REFRESH MATERIALIZED VIEW book_search_view")
-            .execute(repo.write_pool().as_ref())
-            .await
-            .unwrap();
+        let work_id = repo.create(test_book).await.unwrap();
+        repo.upsert_search_index_for_work(work_id).await.unwrap();
 
         let app = setup_observability_test_app(pool).await;
 
@@ -92,6 +186,7 @@ mod observability_tests {
 
     #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_search_observability_metrics(pool: PgPool) {
+        let metrics_harness = MetricsHarness::install();
         // Setup test data
         let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
         let test_book = BookCreateInput {
@@ -100,13 +195,8 @@ mod observability_tests {
             primary_author_name: Some("Metrics Author".to_string()),
             status: Some(BookStatus::Available),
         };
-        repo.create(test_book).await.unwrap();
-
-        // Refresh materialized view
-        sqlx::query("REFRESH MATERIALIZED VIEW book_search_view")
-            .execute(repo.write_pool().as_ref())
-            .await
-            .unwrap();
+        let work_id = repo.create(test_book).await.unwrap();
+        repo.upsert_search_index_for_work(work_id).await.unwrap();
 
         let app = setup_observability_test_app(pool).await;
 
@@ -134,6 +224,46 @@ mod observability_tests {
         let response = app.clone().oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
+        // Perform cacheable letter search twice to produce miss then hit
+        let letter_path = "/books/search?q=m&limit=5";
+        let make_letter_request = || {
+            Request::builder()
+                .method("GET")
+                .uri(letter_path)
+                .body(Body::empty())
+                .unwrap()
+        };
+        let response = app.clone().oneshot(make_letter_request()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let response = app.clone().oneshot(make_letter_request()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let status_counts = metrics_harness.request_status_counts();
+        assert!(
+            status_counts.get("success").copied().unwrap_or(0) >= 3,
+            "should record at least three successful searches"
+        );
+        assert!(
+            status_counts.get("error").copied().unwrap_or(0) >= 1,
+            "should record at least one error search"
+        );
+
+        let total_results = metrics_harness.total_results();
+        assert!(
+            total_results > 0,
+            "result counter should increase for successful searches"
+        );
+
+        let cache_counts = metrics_harness.cache_counts();
+        assert!(
+            cache_counts.get("miss").copied().unwrap_or(0) >= 1,
+            "at least one letter query should be a cache miss"
+        );
+        assert!(
+            cache_counts.get("hit").copied().unwrap_or(0) >= 1,
+            "at least one letter query should hit cache"
+        );
+
         // In a real observability test, you would:
         // 1. Configure a test metrics exporter (like Prometheus test server)
         // 2. Query the metrics endpoint
@@ -156,13 +286,8 @@ mod observability_tests {
             primary_author_name: Some("Logging Author".to_string()),
             status: Some(BookStatus::Available),
         };
-        repo.create(test_book).await.unwrap();
-
-        // Refresh materialized view
-        sqlx::query("REFRESH MATERIALIZED VIEW book_search_view")
-            .execute(repo.write_pool().as_ref())
-            .await
-            .unwrap();
+        let work_id = repo.create(test_book).await.unwrap();
+        repo.upsert_search_index_for_work(work_id).await.unwrap();
 
         let app = setup_observability_test_app(pool).await;
 
@@ -223,30 +348,25 @@ mod observability_tests {
         };
         repo.create(test_book).await.unwrap();
 
-        // Test direct materialized view refresh (similar to what scheduled task does)
+        // Test manual search index rebuild (similar to scheduled maintenance)
         let start_time = std::time::Instant::now();
-        let result = sqlx::query("REFRESH MATERIALIZED VIEW CONCURRENTLY book_search_view")
-            .execute(repo.write_pool().as_ref())
-            .await;
+        let result = repo.rebuild_search_index().await;
         let refresh_duration = start_time.elapsed();
 
-        assert!(result.is_ok(), "Materialized view refresh should succeed");
-        assert!(
-            refresh_duration.as_millis() > 0,
-            "Refresh should take some time"
-        );
+        assert!(result.is_ok(), "Search index rebuild should succeed");
+        assert!(refresh_duration.as_millis() > 0, "Rebuild should take time");
 
         // In a real observability test, you would:
         // 1. Capture the generated span for the refresh operation
         // 2. Validate span attributes like:
-        //    - view.name = "book_search_view"
-        //    - view.refresh_type = "concurrent"
+        //    - view.name = "book_search_index"
+        //    - view.refresh_type = "rebuild"
         //    - view.refresh_duration_ms (should be > 0)
         //    - view.rows_affected (should be >= 0)
         // 3. Check that appropriate log entries were generated
         // 4. Verify timing information is recorded
 
-        tracing::info!("Materialized view refresh observability working");
+        tracing::info!("Search index rebuild observability working");
     }
 
     #[sqlx::test(migrations = "../bookapp-dal/migrations")]
@@ -270,12 +390,7 @@ mod observability_tests {
             },
         ];
         repo.bulk_create(&test_books).await.unwrap();
-
-        // Refresh materialized view
-        sqlx::query("REFRESH MATERIALIZED VIEW book_search_view")
-            .execute(repo.write_pool().as_ref())
-            .await
-            .unwrap();
+        repo.rebuild_search_index().await.unwrap();
 
         let app = setup_observability_test_app(pool).await;
 

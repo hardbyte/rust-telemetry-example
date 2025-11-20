@@ -18,7 +18,7 @@ mod tests {
     use rdkafka::producer::FutureProducer;
     use serde_json::Value;
     use sqlx::PgPool;
-    use std::sync::Arc;
+    use std::{collections::HashSet, sync::Arc};
     use tower::ServiceExt;
     use uuid::Uuid;
 
@@ -70,12 +70,6 @@ mod tests {
                 .and_then(|v| v.to_str().ok()),
             Some("100")
         );
-        assert_eq!(
-            headers
-                .get("x-pagination-offset")
-                .and_then(|v| v.to_str().ok()),
-            Some("0")
-        );
     }
 
     #[sqlx::test(migrations = "../bookapp-dal/migrations")]
@@ -95,7 +89,7 @@ mod tests {
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri("/books/id_list?limit=2&offset=0")
+                    .uri("/books/id_list?limit=2")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -108,11 +102,131 @@ mod tests {
         let ids = json.as_array().expect("ids array");
         assert_eq!(ids.len(), 2);
         assert!(ids.iter().all(|value| value.as_str().is_some()));
+        assert!(headers
+            .get("x-pagination-next-after")
+            .and_then(|v| v.to_str().ok())
+            .is_some());
+    }
+
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
+    async fn test_get_book_ids_cursor_flow(pool: PgPool) {
+        let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        for idx in 0..3 {
+            let input = BookCreateInput {
+                work_title: format!("IDs Cursor Title {idx}"),
+                primary_author_id: None,
+                primary_author_name: Some(format!("IDs Cursor Author {idx}")),
+                status: Some(BookStatus::Available),
+            };
+            repo.create(input).await.unwrap();
+        }
+
+        let app = setup_transactional_test_app(pool.clone()).await;
+        let first_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/books/id_list?limit=2")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first_response.status(), StatusCode::OK);
+        let first_headers = first_response.headers().clone();
+        let next_cursor = first_headers
+            .get("x-pagination-next-after")
+            .and_then(|value| value.to_str().ok())
+            .expect("next cursor for id list")
+            .to_string();
+        assert!(
+            first_headers.get("x-pagination-after").is_none(),
+            "first page should not echo the cursor"
+        );
+        let first_ids: Vec<Uuid> = get_response_json(first_response)
+            .await
+            .as_array()
+            .expect("ids array")
+            .iter()
+            .map(|value| {
+                let raw = value.as_str().expect("uuid string");
+                Uuid::parse_str(raw).expect("valid uuid")
+            })
+            .collect();
+        assert_eq!(first_ids.len(), 2);
+
+        let second_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/books/id_list?limit=2&after={next_cursor}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(second_response.status(), StatusCode::OK);
+        let second_headers = second_response.headers().clone();
         assert_eq!(
-            headers
-                .get("x-pagination-next-offset")
-                .and_then(|v| v.to_str().ok()),
-            Some("2")
+            second_headers
+                .get("x-pagination-after")
+                .and_then(|value| value.to_str().ok()),
+            Some(next_cursor.as_str())
+        );
+        let second_next_cursor = second_headers
+            .get("x-pagination-next-after")
+            .and_then(|value| value.to_str().ok())
+            .expect("cursor for optional third page")
+            .to_string();
+        let second_ids: Vec<Uuid> = get_response_json(second_response)
+            .await
+            .as_array()
+            .expect("ids array")
+            .iter()
+            .map(|value| {
+                let raw = value.as_str().expect("uuid string");
+                Uuid::parse_str(raw).expect("valid uuid")
+            })
+            .collect();
+        assert_eq!(second_ids.len(), 1);
+
+        let third_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/books/id_list?limit=2&after={second_next_cursor}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(third_response.status(), StatusCode::OK);
+        let third_headers = third_response.headers().clone();
+        assert_eq!(
+            third_headers
+                .get("x-pagination-after")
+                .and_then(|value| value.to_str().ok()),
+            Some(second_next_cursor.as_str())
+        );
+        assert!(
+            third_headers.get("x-pagination-next-after").is_none(),
+            "third page should be empty and return no cursor"
+        );
+        let final_ids_json = get_response_json(third_response).await;
+        let final_ids = final_ids_json.as_array().expect("ids array");
+        assert!(
+            final_ids.is_empty(),
+            "requesting beyond the tail should return no rows"
+        );
+
+        let mut dedupe: HashSet<Uuid> = HashSet::new();
+        for id in first_ids.iter().chain(second_ids.iter()) {
+            dedupe.insert(*id);
+        }
+        assert_eq!(
+            dedupe.len(),
+            3,
+            "id list cursor should not duplicate results"
         );
     }
 
@@ -134,7 +248,7 @@ mod tests {
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri("/books?limit=2&offset=1")
+                    .uri("/books?limit=2")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -152,18 +266,129 @@ mod tests {
                 .and_then(|v| v.to_str().ok()),
             Some("2")
         );
-        assert_eq!(
-            headers
-                .get("x-pagination-offset")
-                .and_then(|v| v.to_str().ok()),
-            Some("1")
+        assert!(headers
+            .get("x-pagination-next-after")
+            .and_then(|v| v.to_str().ok())
+            .is_some());
+    }
+
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
+    async fn test_get_all_books_cursor_flow(pool: PgPool) {
+        let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        for idx in 0..4 {
+            let input = BookCreateInput {
+                work_title: format!("Cursor Title {idx}"),
+                primary_author_id: None,
+                primary_author_name: Some(format!("Cursor Author {idx}")),
+                status: Some(BookStatus::Available),
+            };
+            repo.create(input).await.unwrap();
+        }
+
+        let app = setup_transactional_test_app(pool.clone()).await;
+        let first_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/books?limit=2")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first_response.status(), StatusCode::OK);
+        let first_headers = first_response.headers().clone();
+        let next_cursor = first_headers
+            .get("x-pagination-next-after")
+            .and_then(|value| value.to_str().ok())
+            .expect("next cursor for first page")
+            .to_string();
+        assert!(
+            first_headers.get("x-pagination-after").is_none(),
+            "first page should not echo an after header"
         );
+        let first_ids: Vec<Uuid> = get_response_json(first_response)
+            .await
+            .as_array()
+            .expect("books array")
+            .iter()
+            .map(|value| {
+                let id = value["id"].as_str().expect("book id");
+                Uuid::parse_str(id).expect("valid uuid")
+            })
+            .collect();
+        assert_eq!(first_ids.len(), 2);
+
+        let second_uri = format!("/books?limit=2&after={next_cursor}");
+        let second_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(second_uri)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(second_response.status(), StatusCode::OK);
+        let second_headers = second_response.headers().clone();
         assert_eq!(
-            headers
-                .get("x-pagination-next-offset")
-                .and_then(|v| v.to_str().ok()),
-            Some("3")
+            second_headers
+                .get("x-pagination-after")
+                .and_then(|value| value.to_str().ok()),
+            Some(next_cursor.as_str())
         );
+        let second_next_cursor = second_headers
+            .get("x-pagination-next-after")
+            .and_then(|value| value.to_str().ok())
+            .expect("cursor for optional third page")
+            .to_string();
+        let second_ids: Vec<Uuid> = get_response_json(second_response)
+            .await
+            .as_array()
+            .expect("books array")
+            .iter()
+            .map(|value| {
+                let id = value["id"].as_str().expect("book id");
+                Uuid::parse_str(id).expect("valid uuid")
+            })
+            .collect();
+        assert_eq!(second_ids.len(), 2);
+
+        let third_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/books?limit=2&after={second_next_cursor}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(third_response.status(), StatusCode::OK);
+        let third_headers = third_response.headers().clone();
+        assert_eq!(
+            third_headers
+                .get("x-pagination-after")
+                .and_then(|value| value.to_str().ok()),
+            Some(second_next_cursor.as_str())
+        );
+        assert!(
+            third_headers.get("x-pagination-next-after").is_none(),
+            "third page should be empty and stop pagination"
+        );
+        let third_page_count = get_response_json(third_response)
+            .await
+            .as_array()
+            .expect("books array")
+            .len();
+        assert_eq!(third_page_count, 0);
+
+        let mut dedupe = HashSet::new();
+        for id in first_ids.iter().chain(second_ids.iter()) {
+            dedupe.insert(*id);
+        }
+        assert_eq!(dedupe.len(), 4, "cursor pages should not overlap");
     }
 
     #[sqlx::test(migrations = "../bookapp-dal/migrations")]
@@ -694,12 +919,7 @@ mod tests {
             },
         ];
         repo.bulk_create(&test_books).await.unwrap();
-
-        // Refresh materialized view to make books searchable
-        sqlx::query("REFRESH MATERIALIZED VIEW book_search_view")
-            .execute(repo.write_pool().as_ref())
-            .await
-            .unwrap();
+        repo.rebuild_search_index().await.unwrap();
 
         // Test successful search
         let req = Request::builder()

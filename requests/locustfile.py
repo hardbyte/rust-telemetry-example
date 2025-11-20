@@ -51,6 +51,18 @@ BOOK_CACHE = {
 }
 BOOK_CACHE_TTL = float(os.environ.get("LOCUST_BOOK_CACHE_TTL", "2.0"))
 BOOK_PAGE_LIMIT = int(os.environ.get("LOCUST_BOOK_PAGE_LIMIT", "25"))
+BULK_BATCH_SIZE = int(os.environ.get("LOCUST_BULK_BATCH_SIZE", "0"))
+BULK_MIN_SIZE = int(os.environ.get("LOCUST_BULK_MIN_SIZE", "5"))
+BULK_MAX_SIZE = int(os.environ.get("LOCUST_BULK_MAX_SIZE", "20"))
+
+def _resolve_bulk_batch_size():
+    """Determine how many books to pack into a bulk_add request."""
+    if BULK_BATCH_SIZE > 0:
+        return BULK_BATCH_SIZE
+    low = max(1, min(BULK_MIN_SIZE, BULK_MAX_SIZE))
+    high = max(low, BULK_MAX_SIZE)
+    return random.randint(low, high)
+
 
 def init_telemetry(
         service_name: str = "load-tester-client"
@@ -367,8 +379,7 @@ class BookTasks(TaskSet):
 
     @task(1)
     def bulk_create_books(self):
-        # generate 5–20 random books
-        batch_size = random.randint(5, 20)
+        batch_size = _resolve_bulk_batch_size()
         payload = []
         for _ in range(batch_size):
             payload.append({

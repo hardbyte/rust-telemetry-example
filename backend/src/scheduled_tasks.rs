@@ -149,8 +149,8 @@ pub async fn start_scheduler_with_shutdown(
         })?
     };
 
-    // Schedule materialized view refresh (runs every 15 minutes)
-    let search_view_refresh_job = {
+    // Schedule search index refresh (runs every 15 minutes)
+    let search_index_refresh_job = {
         let book_repository = book_repository.clone();
         let search_refresher = search_refresher.clone();
         let startup_span_context = parent_span_context.clone();
@@ -160,8 +160,8 @@ pub async fn start_scheduler_with_shutdown(
             let startup_span_context = startup_span_context.clone();
             Box::pin(async move {
                 let span = tracing::info_span!(
-                    "search_view_refresh",
-                    job.name = "search_view_refresh",
+                    "search_index_refresh",
+                    job.name = "search_index_refresh",
                     job.schedule = "0 */15 * * * *",
                     job.type = "periodic",
                     job.interval_minutes = 15,
@@ -179,8 +179,8 @@ pub async fn start_scheduler_with_shutdown(
                     .in_scope(|| async {
                         let start_time = std::time::Instant::now();
                         info!(
-                            job.name = "search_view_refresh",
-                            "Starting scheduled search view refresh"
+                            job.name = "search_index_refresh",
+                            "Starting scheduled search index refresh"
                         );
 
                         let result = search_refresher
@@ -195,18 +195,18 @@ pub async fn start_scheduler_with_shutdown(
                             Ok(()) => {
                                 tracing::Span::current().record("job.status", "success");
                                 info!(
-                                    job.name = "search_view_refresh",
+                                    job.name = "search_index_refresh",
                                     duration_ms = duration.as_millis(),
-                                    "Search view refresh task completed successfully"
+                                    "Search index refresh task completed successfully"
                                 );
                             }
                             Err(ref e) => {
                                 tracing::Span::current().record("job.status", "error");
                                 error!(
-                                    job.name = "search_view_refresh",
+                                    job.name = "search_index_refresh",
                                     duration_ms = duration.as_millis(),
                                     error = %e,
-                                    "Search view refresh task failed"
+                                    "Search index refresh task failed"
                                 );
                             }
                         }
@@ -215,7 +215,7 @@ pub async fn start_scheduler_with_shutdown(
                     .await;
 
                 if let Err(e) = result {
-                    error!(source = "scheduled_task", error = %e, "Search view refresh job failed");
+                    error!(source = "scheduled_task", error = %e, "Search index refresh job failed");
                 }
             })
         })?
@@ -226,7 +226,7 @@ pub async fn start_scheduler_with_shutdown(
     scheduler.add(refresh_job).await?;
     scheduler.add(stats_job).await?;
     scheduler.add(cleanup_job).await?;
-    scheduler.add(search_view_refresh_job).await?;
+    scheduler.add(search_index_refresh_job).await?;
 
     // Kick off key jobs immediately so telemetry tests can observe them without
     // waiting for the cron schedule.
@@ -239,11 +239,10 @@ pub async fn start_scheduler_with_shutdown(
     {
         let repo = book_repository.clone();
         let search_refresher = search_refresher.clone();
-        spawn_startup_job("refresh_search_materialized_view", "startup", async move {
+        spawn_startup_job("rebuild_search_index", "startup", async move {
             search_refresher
                 .force_refresh_for_schedule(repo.clone())
-                .await?;
-            refresh_search_materialized_view(repo).await
+                .await
         });
     }
 
@@ -340,37 +339,30 @@ async fn cleanup_old_data(_book_repository: Arc<BookRepositoryImpl>) -> Result<(
     Ok(())
 }
 
-/// Refreshes the book search materialized view for full-text search performance
+/// Rebuilds the book search index for full-text search performance
 #[instrument(
     skip(book_repository),
     fields(
-        operation = "refresh_materialized_view",
-        view.name = "book_search_view",
-        view.refresh_type = "concurrent",
+        operation = "rebuild_search_index",
+        view.name = "book_search_index",
+        view.refresh_type = "full",
         view.refresh_duration_ms,
         view.rows_affected,
         maintenance.type = "scheduled"
     )
 )]
-async fn refresh_search_materialized_view(book_repository: Arc<BookRepositoryImpl>) -> Result<()> {
+async fn rebuild_search_index(book_repository: Arc<BookRepositoryImpl>) -> Result<()> {
     let start_time = std::time::Instant::now();
 
     info!(
-        view.name = "book_search_view",
-        operation = "refresh_materialized_view",
-        "Starting materialized view refresh for book search"
+        view.name = "book_search_index",
+        operation = "rebuild_search_index",
+        "Starting search index rebuild"
     );
 
-    // Access the write pool directly for this database maintenance operation
-    let pool = book_repository.write_pool();
-
-    // Refresh the materialized view concurrently (non-blocking for reads)
-    let result = sqlx::query("REFRESH MATERIALIZED VIEW CONCURRENTLY book_search_view")
-        .execute(pool.as_ref())
-        .await?;
+    let rows_affected = book_repository.rebuild_search_index().await?;
 
     let refresh_duration = start_time.elapsed();
-    let rows_affected = result.rows_affected();
 
     // Record span attributes
     tracing::Span::current().record(
@@ -380,11 +372,11 @@ async fn refresh_search_materialized_view(book_repository: Arc<BookRepositoryImp
     tracing::Span::current().record("view.rows_affected", rows_affected);
 
     info!(
-        view.name = "book_search_view",
+        view.name = "book_search_index",
         view.refresh_duration_ms = refresh_duration.as_millis(),
         view.rows_affected = rows_affected,
-        operation = "refresh_materialized_view",
-        "Materialized view refresh completed successfully"
+        operation = "rebuild_search_index",
+        "Search index rebuild completed successfully"
     );
 
     Ok(())
@@ -401,8 +393,8 @@ where
                 job.schedule = schedule,
                 job.type = "startup"
             ),
-            "refresh_search_materialized_view" => tracing::info_span!(
-                "refresh_search_materialized_view",
+            "rebuild_search_index" => tracing::info_span!(
+                "rebuild_search_index",
                 job.schedule = schedule,
                 job.type = "startup"
             ),
@@ -454,7 +446,7 @@ mod tests {
     use std::sync::Arc;
 
     #[sqlx::test(migrations = "../bookapp-dal/migrations")]
-    async fn test_refresh_search_materialized_view(pool: PgPool) {
+    async fn test_rebuild_search_index_job(pool: PgPool) {
         let repo = Arc::new(BookRepositoryImpl::single_pool(Arc::new(pool)));
 
         // Create test data first
@@ -466,9 +458,9 @@ mod tests {
         };
         repo.create(test_book).await.unwrap();
 
-        // Test the refresh function
-        let result = refresh_search_materialized_view(repo.clone()).await;
-        assert!(result.is_ok(), "Materialized view refresh should succeed");
+        // Test the rebuild function
+        let result = rebuild_search_index(repo.clone()).await;
+        assert!(result.is_ok(), "Search index rebuild should succeed");
 
         // Verify the materialized view has data after refresh
         let search_results = repo
@@ -477,7 +469,7 @@ mod tests {
             .unwrap();
         assert!(
             !search_results.is_empty(),
-            "Search should find the test book after refresh"
+            "Search should find the test book after rebuild"
         );
         assert!(search_results
             .iter()
@@ -497,7 +489,7 @@ mod tests {
             Arc<BookRepositoryImpl>,
         ) -> std::pin::Pin<
             Box<dyn std::future::Future<Output = Result<()>> + Send>,
-        > = |repo| Box::pin(refresh_search_materialized_view(repo));
+        > = |repo| Box::pin(rebuild_search_index(repo));
 
         // Error handling pattern is correctly implemented - verified at compile-time
     }

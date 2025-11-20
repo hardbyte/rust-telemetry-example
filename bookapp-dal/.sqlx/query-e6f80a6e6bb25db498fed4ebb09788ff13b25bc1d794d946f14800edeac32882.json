@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH input(title) AS (\n                SELECT unnest($1::text[])\n            )\n            INSERT INTO works (title)\n            SELECT title FROM input\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e6f80a6e6bb25db498fed4ebb09788ff13b25bc1d794d946f14800edeac32882"
+}

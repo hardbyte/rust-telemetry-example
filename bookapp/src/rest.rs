@@ -1,5 +1,4 @@
 use crate::database::DatabasePools;
-use anyhow::Result as AnyhowResult;
 use axum::extract::{Path, Query};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::routing::{get, post};
@@ -14,12 +13,11 @@ use bookapp_dal::repository::{
     WorkRepositoryImpl,
 };
 use bookapp_dal::{Book, BookRepositoryImpl};
+use moka::future::Cache;
 use once_cell::sync::Lazy;
 use rdkafka::producer::FutureProducer;
 use serde::Deserialize;
-use std::collections::HashMap;
-use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
+use std::time::Duration;
 use tracing::Level;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use utoipa::OpenApi;
@@ -30,9 +28,14 @@ const MAX_BOOKS_LIMIT: i64 = 500;
 const MAX_SEARCH_LIMIT: i64 = 50;
 const SHORT_QUERY_LIMIT: i64 = 10;
 const LETTER_CACHE_TTL_SECS: u64 = 5;
+const LETTER_CACHE_MAX_ENTRIES: u64 = 1024;
 
-static LETTER_SEARCH_CACHE: Lazy<SearchCache> =
-    Lazy::new(|| SearchCache::new(Duration::from_secs(LETTER_CACHE_TTL_SECS)));
+static LETTER_SEARCH_CACHE: Lazy<Cache<String, Vec<BookSearchResult>>> = Lazy::new(|| {
+    Cache::builder()
+        .time_to_live(Duration::from_secs(LETTER_CACHE_TTL_SECS))
+        .max_capacity(LETTER_CACHE_MAX_ENTRIES)
+        .build()
+});
 
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
@@ -41,63 +44,19 @@ pub struct ListBooksParams {
     #[serde(default = "default_books_limit")]
     #[param(minimum = 1, maximum = 500)]
     pub limit: i64,
-    /// Number of books to skip before starting the page (default 0)
+    /// Cursor for keyset pagination
     #[serde(default)]
-    #[param(minimum = 0)]
-    pub offset: i64,
+    pub after: Option<Uuid>,
 }
 
 const fn default_books_limit() -> i64 {
     DEFAULT_BOOKS_LIMIT
 }
 
-struct CachedSearchEntry {
-    expires_at: Instant,
-    results: Vec<BookSearchResult>,
-}
-
-struct SearchCache {
-    ttl: Duration,
-    inner: RwLock<HashMap<String, CachedSearchEntry>>,
-}
-
-impl SearchCache {
-    fn new(ttl: Duration) -> Self {
-        Self {
-            ttl,
-            inner: RwLock::new(HashMap::new()),
-        }
-    }
-
-    async fn get(&self, key: &str) -> Option<Vec<BookSearchResult>> {
-        let now = Instant::now();
-        let mut guard = self.inner.write().await;
-        if let Some(entry) = guard.get(key) {
-            if entry.expires_at > now {
-                return Some(entry.results.clone());
-            }
-        }
-        guard.remove(key);
-        None
-    }
-
-    async fn store(&self, key: String, results: Vec<BookSearchResult>) {
-        let expires_at = Instant::now() + self.ttl;
-        let mut guard = self.inner.write().await;
-        guard.insert(
-            key,
-            CachedSearchEntry {
-                expires_at,
-                results,
-            },
-        );
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 struct Pagination {
     limit: i64,
-    offset: i64,
+    after: Option<Uuid>,
     clamped: bool,
 }
 
@@ -109,35 +68,42 @@ impl From<&ListBooksParams> for Pagination {
             clamped = true;
             limit = limit.clamp(1, MAX_BOOKS_LIMIT);
         }
-        let mut offset = params.offset;
-        if offset < 0 {
-            clamped = true;
-            offset = 0;
-        }
         Pagination {
             limit,
-            offset,
+            after: params.after,
             clamped,
         }
     }
 }
 
 impl Pagination {
-    fn headers(&self, returned: usize) -> HeaderMap {
+    fn headers(&self, returned: usize, next_after: Option<Uuid>) -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.insert(
             "x-pagination-limit",
             HeaderValue::from_str(&self.limit.to_string())
                 .unwrap_or_else(|_| HeaderValue::from_static("0")),
         );
+        if let Some(after) = self.after {
+            headers.insert(
+                "x-pagination-after",
+                HeaderValue::from_str(after.to_string().as_str())
+                    .unwrap_or_else(|_| HeaderValue::from_static("")),
+            );
+        }
+        if let Some(cursor) = next_after {
+            headers.insert(
+                "x-pagination-next-after",
+                HeaderValue::from_str(cursor.to_string().as_str())
+                    .unwrap_or_else(|_| HeaderValue::from_static("")),
+            );
+        }
+        if self.clamped {
+            headers.insert("x-pagination-clamped", HeaderValue::from_static("true"));
+        }
         headers.insert(
-            "x-pagination-offset",
-            HeaderValue::from_str(&self.offset.to_string())
-                .unwrap_or_else(|_| HeaderValue::from_static("0")),
-        );
-        headers.insert(
-            "x-pagination-next-offset",
-            HeaderValue::from_str(&(self.offset + returned as i64).to_string())
+            "x-pagination-returned",
+            HeaderValue::from_str(&returned.to_string())
                 .unwrap_or_else(|_| HeaderValue::from_static("0")),
         );
         headers
@@ -151,8 +117,9 @@ impl Pagination {
     responses(
         (status = 200, description = "List books", body = [Book], headers(
             ("x-pagination-limit" = i64, description = "Sanitized page size that was applied"),
-            ("x-pagination-offset" = i64, description = "Offset supplied (or defaulted) for this page"),
-            ("x-pagination-next-offset" = i64, description = "Offset to request the next page")
+            ("x-pagination-after" = String, description = "Cursor supplied for this page"),
+            ("x-pagination-next-after" = String, description = "Cursor to request the next page"),
+            ("x-pagination-returned" = i64, description = "Number of rows returned")
         )),
         (status = 503, description = "Database temporarily unavailable")
     ),
@@ -163,7 +130,6 @@ impl Pagination {
     fields(
         num_books,
         books.limit,
-        books.offset,
         http.request.method = "GET",
         http.route = "/books",
         url.path = "/books"
@@ -175,16 +141,17 @@ async fn get_all_books(
 ) -> Result<(HeaderMap, Json<Vec<Book>>), StatusCode> {
     let pagination = Pagination::from(&params);
     tracing::Span::current().record("books.limit", pagination.limit);
-    tracing::Span::current().record("books.offset", pagination.offset);
+    tracing::Span::current().record("books.after", format!("{:?}", pagination.after));
     tracing::Span::current().record("books.limit_clamped", pagination.clamped);
     tracing::info!("Listing books with pagination");
 
     let repo = BookRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
-    match repo.find_all(pagination.limit, pagination.offset).await {
+    match repo.find_all(pagination.limit, pagination.after).await {
         Ok(books) => {
             tracing::Span::current().record("num_books", books.len() as i64);
             tracing::Span::current().record("http.response.status_code", 200);
-            let headers = pagination.headers(books.len());
+            let next_cursor = books.last().map(|b| b.id);
+            let headers = pagination.headers(books.len(), next_cursor);
             Ok((headers, Json(books)))
         }
         Err(e) => {
@@ -202,8 +169,9 @@ async fn get_all_books(
     responses(
         (status = 200, description = "List book IDs", body = [Uuid], headers(
             ("x-pagination-limit" = i64, description = "Sanitized page size that was applied"),
-            ("x-pagination-offset" = i64, description = "Offset supplied (or defaulted) for this page"),
-            ("x-pagination-next-offset" = i64, description = "Offset to request the next page")
+            ("x-pagination-after" = String, description = "Cursor supplied for this page"),
+            ("x-pagination-next-after" = String, description = "Cursor to request the next page"),
+            ("x-pagination-returned" = i64, description = "Number of rows returned")
         )),
         (status = 503, description = "Database temporarily unavailable")
     ),
@@ -214,7 +182,6 @@ async fn get_all_books(
     fields(
         num_books,
         books.limit,
-        books.offset,
         http.request.method = "GET",
         http.route = "/books/id_list",
         url.path = "/books/id_list"
@@ -226,16 +193,17 @@ async fn get_book_ids(
 ) -> Result<(HeaderMap, Json<Vec<Uuid>>), StatusCode> {
     let pagination = Pagination::from(&params);
     tracing::Span::current().record("books.limit", pagination.limit);
-    tracing::Span::current().record("books.offset", pagination.offset);
+    tracing::Span::current().record("books.after", format!("{:?}", pagination.after));
     tracing::Span::current().record("books.limit_clamped", pagination.clamped);
     tracing::info!("Listing book IDs with pagination");
 
     let repo = BookRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
-    match repo.list_ids(pagination.limit, pagination.offset).await {
+    match repo.list_ids(pagination.limit, pagination.after).await {
         Ok(ids) => {
             tracing::Span::current().record("books.ids_returned", ids.len() as i64);
             tracing::Span::current().record("http.response.status_code", 200);
-            let headers = pagination.headers(ids.len());
+            let next_cursor = ids.last().cloned();
+            let headers = pagination.headers(ids.len(), next_cursor);
             Ok((headers, Json(ids)))
         }
         Err(e) => {
@@ -404,22 +372,39 @@ async fn create_book(
         BookRepositoryImpl::new(db_pools.write_pool.clone(), db_pools.read_pool.clone());
     let event_repo = EventRepositoryImpl::new(db_pools.write_pool.clone(), db_pools.read_pool);
 
-    match book_repo.create(book.clone()).await {
-        Ok(new_id) => {
-            // Create domain event for outbox pattern
-            if let Err(e) = create_book_created_event(&event_repo, new_id, &book).await {
-                tracing::error!(
-                    error = %e,
-                    book_id = %new_id,
-                    "Failed to create BookCreated domain event"
-                );
-                // Note: We don't fail the request since the book was successfully created
-            }
+    let mut tx = db_pools
+        .write_pool
+        .begin()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-            Ok((StatusCode::CREATED, Json(new_id)))
-        }
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
-    }
+    let new_id = book_repo
+        .create_with(&mut tx, book.clone())
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to create book record");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let event = build_book_created_event(new_id, &book);
+    event_repo
+        .append_with(tx.as_mut(), event)
+        .await
+        .map_err(|e| {
+            tracing::error!(
+                error = %e,
+                book_id = %new_id,
+                "Failed to create BookCreated domain event"
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    tx.commit().await.map_err(|e| {
+        tracing::error!(error = %e, book_id = %new_id, "Failed to commit book creation");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok((StatusCode::CREATED, Json(new_id)))
 }
 
 #[tracing::instrument(skip(db_pools), fields(num_books))]
@@ -671,6 +656,11 @@ async fn search_books(
         .with_description("Total number of search results returned")
         .build();
 
+    let cache_events_counter = meter
+        .u64_counter("book_search_cache_events_total")
+        .with_description("Cache hit/miss events for single-letter book searches")
+        .build();
+
     // Validate query parameters
     if effective_query.is_empty() {
         search_counter.add(
@@ -708,6 +698,7 @@ async fn search_books(
 
     let repo = BookRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
     let mut cache_status = "miss";
+    let mut recorded_cache_metric = false;
     let cache_key = if should_cache {
         Some(cache_key(&effective_query))
     } else {
@@ -722,10 +713,12 @@ async fn search_books(
     let results = if let Some(key) = cache_key.as_ref() {
         if let Some(cached) = LETTER_SEARCH_CACHE.get(key).await {
             cache_status = "hit";
+            recorded_cache_metric = true;
             cached
         } else {
             let fresh = db_fetch.await?;
-            LETTER_SEARCH_CACHE.store(key.clone(), fresh.clone()).await;
+            LETTER_SEARCH_CACHE.insert(key.clone(), fresh.clone()).await;
+            recorded_cache_metric = true;
             fresh
         }
     } else {
@@ -743,6 +736,12 @@ async fn search_books(
             search_counter.add(1, &[opentelemetry::KeyValue::new("status", "success")]);
             search_duration.record(execution_time.as_secs_f64(), &[]);
             search_results_counter.add(result_count as u64, &[]);
+            if recorded_cache_metric {
+                cache_events_counter.add(
+                    1,
+                    &[opentelemetry::KeyValue::new("cache.status", cache_status)],
+                );
+            }
 
             // Record span attributes
             tracing::Span::current().record("search.result_count", result_count);
@@ -773,6 +772,12 @@ async fn search_books(
                 execution_time.as_secs_f64(),
                 &[opentelemetry::KeyValue::new("error", "true")],
             );
+            if recorded_cache_metric {
+                cache_events_counter.add(
+                    1,
+                    &[opentelemetry::KeyValue::new("cache.status", cache_status)],
+                );
+            }
 
             tracing::error!(
                 search.query = %effective_query,
@@ -865,13 +870,8 @@ async fn serve_openapi() -> axum::response::Json<utoipa::openapi::OpenApi> {
     axum::response::Json(ApiDoc::openapi())
 }
 
-/// Create a BookCreated domain event for the outbox pattern
-#[tracing::instrument(skip(event_repo), fields(book_id = %book_id))]
-async fn create_book_created_event(
-    event_repo: &EventRepositoryImpl,
-    book_id: Uuid,
-    book: &BookCreateInput,
-) -> AnyhowResult<i64> {
+/// Construct a BookCreated domain event payload for the outbox pattern
+fn build_book_created_event(book_id: Uuid, book: &BookCreateInput) -> EventCreateInput {
     use opentelemetry::trace::TraceContextExt;
     use tracing_opentelemetry::OpenTelemetrySpanExt;
 
@@ -881,7 +881,7 @@ async fn create_book_created_event(
     let trace_id = format!("{:032x}", otel_span.span_context().trace_id());
     let span_id = format!("{:016x}", otel_span.span_context().span_id());
 
-    let event = EventCreateInput {
+    EventCreateInput {
         aggregate_type: "Book".to_string(),
         aggregate_id: book_id.to_string(),
         event_type: "BookCreated".to_string(),
@@ -900,12 +900,7 @@ async fn create_book_created_event(
         published_at: None,
         publish_attempts: None,
         publish_error: None,
-    };
-
-    event_repo
-        .append(event)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to create event: {}", e))
+    }
 }
 
 #[cfg(test)]

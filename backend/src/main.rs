@@ -36,10 +36,15 @@ async fn main() -> Result<()> {
 
     // Initialize database pool
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let max_connections = std::env::var("BACKEND_DB_MAX_CONNECTIONS")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(32);
     let db_pool = PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(max_connections)
         .connect(&db_url)
         .await?;
+    info!(max_connections, "Created backend database pool");
 
     let db_pool = Arc::new(db_pool);
 
@@ -79,6 +84,8 @@ async fn main() -> Result<()> {
         .set("queue.buffering.max.ms", "50")
         .create()
         .expect("Failed to create Kafka producer");
+    let dlq_topic =
+        std::env::var("BOOK_INGESTION_DLQ_TOPIC").unwrap_or_else(|_| "book_ingestion.dlq".into());
 
     // Outbox publisher configuration
     let outbox_config = OutboxPublisherConfig {
@@ -107,6 +114,7 @@ async fn main() -> Result<()> {
     let new_topics = vec![
         NewTopic::new(&outbox_topic, 1, TopicReplication::Fixed(1)),
         NewTopic::new("book_ingestion", 1, TopicReplication::Fixed(1)),
+        NewTopic::new(&dlq_topic, 1, TopicReplication::Fixed(1)),
     ];
     match admin_client
         .create_topics(&new_topics, &AdminOptions::new())
@@ -138,9 +146,11 @@ async fn main() -> Result<()> {
         let mut rx = shutdown_rx.clone();
         let book_repository = book_repository.clone();
         let search_refresher = search_refresher.clone();
+        let consumer_producer = producer.clone();
+        let dlq_topic = dlq_topic.clone();
         async move {
             tokio::select! {
-                res = book_ingestion::run_consumer(book_repository, search_refresher) => {
+                res = book_ingestion::run_consumer(book_repository, search_refresher, consumer_producer, dlq_topic) => {
                     if let Err(e) = res {
                         tracing::error!("Kafka consumer error: {:?}", e);
                     }

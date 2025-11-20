@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                SELECT\n                  id,\n                  occurred_at,\n                  aggregate_type,\n                  aggregate_id,\n                  event_type,\n                  payload     as \"payload!\",\n                  headers     as \"headers!\",\n                  trace_id,\n                  span_id,\n                  source_service,\n                  version,\n                  topic,\n                  published_at,\n                  publish_attempts,\n                  publish_error\n                FROM events\n                WHERE published_at IS NULL\n                ORDER BY occurred_at, id\n                LIMIT $1\n                ",
+  "query": "\n                SELECT\n                  id,\n                  occurred_at,\n                  aggregate_type,\n                  aggregate_id,\n                  event_type,\n                  payload     as \"payload!\",\n                  headers     as \"headers!\",\n                  trace_id,\n                  span_id,\n                  source_service,\n                  version,\n                  topic,\n                  published_at,\n                  publish_attempts,\n                  publish_error\n                FROM events\n                WHERE published_at IS NULL\n                ORDER BY occurred_at, id\n                LIMIT $1\n                FOR UPDATE SKIP LOCKED\n                ",
   "describe": {
     "columns": [
       {
@@ -102,5 +102,5 @@
       true
     ]
   },
-  "hash": "acef9e82b903baa28ad44c60e8919ad5c5d0da801694b61454eb7f23e9adf060"
+  "hash": "a5b43274de5bb612058b8e914ede7169db84697f5615a1a5ebde783d5f2df759"
 }

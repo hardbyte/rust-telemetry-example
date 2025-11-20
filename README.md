@@ -489,12 +489,19 @@ your catalog and desired ID pool size—smaller values reduce the load on Postgr
 
 ### Books API Paging
 
-`GET /books` now accepts `limit` (default 100, max 500) and `offset` query parameters. Responses continue to return a JSON
-array, but each request also emits `x-pagination-limit`, `x-pagination-offset`, and `x-pagination-next-offset` headers so
-clients can iterate through the catalog without downloading the entire table. Always request only as many rows as you need
-and advance `offset` using the header values to keep PostgreSQL latency low. If you only need identifiers (e.g., for load
-testing), call `GET /books/id_list` with the same parameters to receive a lightweight array of UUIDs and the same pagination
-metadata in the response headers.
+`GET /books` uses **cursor pagination**. Each request supplies a `limit` (default 100, max 500) and an optional `after`
+cursor. Start with `GET /books?limit=50`, read the `x-pagination-next-after` header from the response, and pass that value
+back as `after` to fetch the next window. Responses include:
+
+- `x-pagination-limit` – the sanitized page size that was applied (after clamping)
+- `x-pagination-after` – echoes the cursor you supplied (if any) so clients can trace which slice was served
+- `x-pagination-next-after` – cursor for the next page; omit or stop when this header disappears
+- `x-pagination-returned` – number of rows returned in this response
+- `x-pagination-clamped` – present when we had to clamp an out-of-range limit (e.g., someone asked for >500)
+
+The same headers apply to `GET /books/id_list`, which returns only UUIDs for lightweight clients or load generators.
+All cursors are UUIDv7s so they sort chronologically and remain stable even when IDs are sparse—just keep passing the
+latest `x-pagination-next-after` value until it disappears to cover the whole catalog without expensive `OFFSET` scans.
 
 ### Search Endpoint Guardrails
 
@@ -502,6 +509,7 @@ metadata in the response headers.
   tend to drive the heaviest load during alphabetic browsing.
 - Alphabetic searches are cached for ~5 seconds inside the API process, keeping the Postgres pool free for more selective
   queries while still providing snappy UX for list-style discovery flows.
+- The search backend stores pre-computed vectors in the `book_search_index` table. Entries are written incrementally by the backend Kafka consumer (via the outbox pattern) and periodically rebuilt by the scheduled maintenance job as a safety net.
 
 ### Database Pool Tuning
 
@@ -517,6 +525,11 @@ metadata in the response headers.
 
 The Postgres container is started with `max_connections=300` so the larger pools can sustain high-concurrency load tests
 without timing out.
+
+The backend worker now exposes `BACKEND_DB_MAX_CONNECTIONS` (default `32`) so Kafka consumers and scheduled jobs can scale
+independently from the API. Increase it when you expect heavy background refresh traffic or a surge of ingestion events.
+
+> **PostgreSQL 18+ required**: The schema now relies on the native [`uuidv7()`](https://www.postgresql.org/docs/current/functions-uuid.html) generator that ships with PostgreSQL 18. The migration `20251120190000_use_native_uuidv7.sql` will refuse to run on older versions; upgrade your cluster (or stick to Docker Compose’s `postgres:18` image) before applying new migrations.
 
 ![img.png](./.github/locust-screenshot.png)
 

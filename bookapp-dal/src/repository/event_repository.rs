@@ -200,6 +200,7 @@ impl EventRepositoryImpl {
                 WHERE published_at IS NULL AND topic = $1
                 ORDER BY occurred_at, id
                 LIMIT $2
+                FOR UPDATE SKIP LOCKED
                 "#,
                 t,
                 limit
@@ -231,6 +232,7 @@ impl EventRepositoryImpl {
                 WHERE published_at IS NULL
                 ORDER BY occurred_at, id
                 LIMIT $1
+                FOR UPDATE SKIP LOCKED
                 "#,
                 limit
             )

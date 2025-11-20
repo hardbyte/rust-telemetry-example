@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                w.id\n            FROM works w\n            ORDER BY w.id\n            LIMIT $1\n            OFFSET $2\n            ",
+  "query": "\n            SELECT\n                w.id\n            FROM works w\n            ORDER BY w.id\n            LIMIT $1\n            ",
   "describe": {
     "columns": [
       {
@@ -11,7 +11,6 @@
     ],
     "parameters": {
       "Left": [
-        "Int8",
         "Int8"
       ]
     },
@@ -19,5 +18,5 @@
       false
     ]
   },
-  "hash": "049cf9b2473298f0e21d05de95f66335c574e6adad73777fb5f67817ce87869d"
+  "hash": "f57d210cb140c17113bb72ed71ec23dc8043d1a8587f23cc2c084fa0a77ff196"
 }

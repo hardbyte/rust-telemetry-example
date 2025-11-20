@@ -66,7 +66,7 @@ services:
 
 
   db:
-    image: postgres:17
+    image: postgres:18
     command:
       ["postgres", "-c", "max_connections=300", "-c", "shared_buffers=256MB"]
     environment:

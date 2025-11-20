@@ -2,7 +2,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use anyhow::Result;
-use once_cell::sync::OnceCell;
 use opentelemetry::metrics::{Counter, Histogram, Meter, UpDownCounter};
 use opentelemetry::KeyValue;
 use tracing::{error, info, instrument};
@@ -16,24 +15,27 @@ pub struct SmartSearchRefresher {
     min_interval_secs: u64,
     max_staleness_secs: u64,
     pending_updates: AtomicU64,
+    metrics: RefreshMetrics,
 }
 
 impl SmartSearchRefresher {
     pub fn new(min_interval_secs: u64, max_staleness_secs: u64) -> Self {
+        let meter: Meter = opentelemetry::global::meter("backend");
         Self {
             last_refresh: AtomicU64::new(0),
             refresh_in_progress: AtomicBool::new(false),
             min_interval_secs,
             max_staleness_secs,
             pending_updates: AtomicU64::new(0),
+            metrics: RefreshMetrics::new(&meter),
         }
     }
 
     pub fn notify_book_changed(&self) {
         self.pending_updates.fetch_add(1, Ordering::Relaxed);
-        metrics()
+        self.metrics
             .pending
-            .add(1, &[KeyValue::new("view.name", "book_search_view")]);
+            .add(1, &[KeyValue::new("view.name", "book_search_index")]);
     }
 
     /// Force a refresh for scheduled tasks (bypasses smart logic)
@@ -61,8 +63,8 @@ impl SmartSearchRefresher {
         &self,
         book_repository: Arc<BookRepositoryImpl>,
     ) -> Result<RefreshDecision> {
-        let common_attrs = [KeyValue::new("view.name", "book_search_view")];
-        metrics().requests.add(1, &common_attrs);
+        let common_attrs = [KeyValue::new("view.name", "book_search_index")];
+        self.metrics.requests.add(1, &common_attrs);
         let now_secs = current_timestamp_secs();
         let last_refresh = self.last_refresh.load(Ordering::Relaxed);
         let age_secs = now_secs.saturating_sub(last_refresh);
@@ -77,12 +79,12 @@ impl SmartSearchRefresher {
         match decision {
             RefreshDecision::Skip(reason) => {
                 tracing::Span::current().record("circuit_breaker.state", "closed");
-                metrics().skipped.add(
+                self.metrics.skipped.add(
                     1,
                     &[
                         KeyValue::new("reason", reason.clone()),
                         KeyValue::new("circuit_breaker.state", "closed"),
-                        KeyValue::new("view.name", "book_search_view"),
+                        KeyValue::new("view.name", "book_search_index"),
                     ],
                 );
                 info!(
@@ -168,26 +170,26 @@ impl SmartSearchRefresher {
                     rows_affected = rows_affected,
                     "Search index refresh completed successfully"
                 );
-                metrics().executed.add(
+                self.metrics.executed.add(
                     1,
                     &[
                         KeyValue::new("trigger", trigger),
                         KeyValue::new("circuit_breaker.state", "open"),
-                        KeyValue::new("view.name", "book_search_view"),
+                        KeyValue::new("view.name", "book_search_index"),
                     ],
                 );
-                metrics().duration.record(
+                self.metrics.duration.record(
                     refresh_duration.as_secs_f64(),
                     &[
                         KeyValue::new("trigger", trigger),
-                        KeyValue::new("view.name", "book_search_view"),
+                        KeyValue::new("view.name", "book_search_index"),
                     ],
                 );
                 // Adjust gauges using up/down counters
                 if prev_pending > 0 {
-                    metrics().pending.add(
+                    self.metrics.pending.add(
                         -(prev_pending as i64),
-                        &[KeyValue::new("view.name", "book_search_view")],
+                        &[KeyValue::new("view.name", "book_search_index")],
                     );
                 }
                 // Set last refresh timestamp by adding delta from previous
@@ -197,9 +199,9 @@ impl SmartSearchRefresher {
                     now_secs as i64 - prev_last as i64
                 };
                 if delta != 0 {
-                    metrics()
+                    self.metrics
                         .last_ts
-                        .add(delta, &[KeyValue::new("view.name", "book_search_view")]);
+                        .add(delta, &[KeyValue::new("view.name", "book_search_index")]);
                 }
 
                 Ok(RefreshDecision::Refreshed {
@@ -219,11 +221,8 @@ impl SmartSearchRefresher {
     }
 
     async fn do_refresh(&self, book_repository: Arc<BookRepositoryImpl>) -> Result<u64> {
-        let pool = book_repository.write_pool();
-        let result = sqlx::query("REFRESH MATERIALIZED VIEW CONCURRENTLY book_search_view")
-            .execute(pool.as_ref())
-            .await?;
-        Ok(result.rows_affected())
+        let rows = book_repository.rebuild_search_index().await?;
+        Ok(rows)
     }
 }
 
@@ -261,6 +260,7 @@ impl Default for SearchRefreshConfig {
     }
 }
 
+#[derive(Debug)]
 struct RefreshMetrics {
     requests: Counter<u64>,
     executed: Counter<u64>,
@@ -270,11 +270,8 @@ struct RefreshMetrics {
     last_ts: UpDownCounter<i64>,
 }
 
-static METRICS: OnceCell<RefreshMetrics> = OnceCell::new();
-
-fn metrics() -> &'static RefreshMetrics {
-    METRICS.get_or_init(|| {
-        let meter: Meter = opentelemetry::global::meter("backend");
+impl RefreshMetrics {
+    fn new(meter: &Meter) -> Self {
         let requests = meter
             .u64_counter("search_refresh_requests")
             .with_description("Total smart search refresh requests")
@@ -299,7 +296,7 @@ fn metrics() -> &'static RefreshMetrics {
             .i64_up_down_counter("search_refresh_last_refresh_timestamp_seconds")
             .with_description("Unix timestamp (seconds) of last successful search refresh")
             .build();
-        RefreshMetrics {
+        Self {
             requests,
             executed,
             skipped,
@@ -307,7 +304,7 @@ fn metrics() -> &'static RefreshMetrics {
             pending,
             last_ts,
         }
-    })
+    }
 }
 
 impl SmartSearchRefresher {

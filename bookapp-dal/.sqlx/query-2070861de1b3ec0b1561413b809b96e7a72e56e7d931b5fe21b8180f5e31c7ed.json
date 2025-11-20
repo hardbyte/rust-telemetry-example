@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                WITH input(name) AS (\n                    SELECT DISTINCT val\n                    FROM unnest($1::text[]) AS data(val)\n                )\n                INSERT INTO authors (name, sort_name)\n                SELECT name, NULL\n                FROM input\n                ON CONFLICT (name)\n                DO UPDATE\n                SET sort_name = COALESCE(EXCLUDED.sort_name, authors.sort_name)\n                RETURNING name, id\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "2070861de1b3ec0b1561413b809b96e7a72e56e7d931b5fe21b8180f5e31c7ed"
+}
