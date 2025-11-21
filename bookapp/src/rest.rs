@@ -19,7 +19,6 @@ use rdkafka::producer::FutureProducer;
 use serde::Deserialize;
 use std::time::Duration;
 use tracing::Level;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 use utoipa::OpenApi;
 use uuid::Uuid;
 
@@ -64,7 +63,7 @@ impl From<&ListBooksParams> for Pagination {
     fn from(params: &ListBooksParams) -> Self {
         let mut clamped = false;
         let mut limit = params.limit;
-        if limit < 1 || limit > MAX_BOOKS_LIMIT {
+        if !(1..=MAX_BOOKS_LIMIT).contains(&limit) {
             clamped = true;
             limit = limit.clamp(1, MAX_BOOKS_LIMIT);
         }
@@ -422,27 +421,6 @@ async fn bulk_create_books(
             tracing::error!(error=%e, "bulk insert failed");
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
-    }
-}
-
-#[tracing::instrument(skip(producer), fields(otel.kind = "Producer"))]
-async fn queue_background_ingestion_task(producer: &FutureProducer, new_id: Uuid) {
-    // Prepare message
-    let book_message = crate::book_ingestion::BookIngestionMessage { book_id: new_id };
-
-    // Get current OpenTelemetry context from the current tracing span
-    let otel_context = tracing::Span::current().context();
-
-    // Send message to Kafka
-    if let Err(e) =
-        crate::book_ingestion::send_book_ingestion_message(producer, &book_message, &otel_context)
-            .await
-    {
-        tracing::error!(error = format!("{e:#}"), book_id = %new_id, "Failed to send Kafka message");
-        // Set span status to error
-        tracing::Span::current().set_attribute("otel.status_code", "ERROR");
-    } else {
-        tracing::info!(book_id = %new_id, "Sent Kafka message");
     }
 }
 
@@ -903,6 +881,21 @@ fn build_book_created_event(book_id: Uuid, book: &BookCreateInput) -> EventCreat
     }
 }
 
+pub fn openapi_router() -> Router {
+    use axum::{response::Html, routing::get};
+    use utoipa_swagger_ui::SwaggerUi;
+
+    let debug_route = Router::new().route(
+        "/debug",
+        get(|| async { Html("<h1>OpenAPI router is working!</h1>") }),
+    );
+
+    Router::new()
+        .merge(api_router())
+        .merge(debug_route)
+        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
+}
+
 #[cfg(test)]
 mod search_limit_tests {
     use super::sanitize_search_limit;
@@ -918,19 +911,4 @@ mod search_limit_tests {
         assert_eq!(sanitize_search_limit(40, 1), 10);
         assert_eq!(sanitize_search_limit(5, 1), 5);
     }
-}
-
-pub fn openapi_router() -> Router {
-    use axum::{response::Html, routing::get};
-    use utoipa_swagger_ui::SwaggerUi;
-
-    let debug_route = Router::new().route(
-        "/debug",
-        get(|| async { Html("<h1>OpenAPI router is working!</h1>") }),
-    );
-
-    Router::new()
-        .merge(api_router())
-        .merge(debug_route)
-        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
 }

@@ -339,49 +339,6 @@ async fn cleanup_old_data(_book_repository: Arc<BookRepositoryImpl>) -> Result<(
     Ok(())
 }
 
-/// Rebuilds the book search index for full-text search performance
-#[instrument(
-    skip(book_repository),
-    fields(
-        operation = "rebuild_search_index",
-        view.name = "book_search_index",
-        view.refresh_type = "full",
-        view.refresh_duration_ms,
-        view.rows_affected,
-        maintenance.type = "scheduled"
-    )
-)]
-async fn rebuild_search_index(book_repository: Arc<BookRepositoryImpl>) -> Result<()> {
-    let start_time = std::time::Instant::now();
-
-    info!(
-        view.name = "book_search_index",
-        operation = "rebuild_search_index",
-        "Starting search index rebuild"
-    );
-
-    let rows_affected = book_repository.rebuild_search_index().await?;
-
-    let refresh_duration = start_time.elapsed();
-
-    // Record span attributes
-    tracing::Span::current().record(
-        "view.refresh_duration_ms",
-        refresh_duration.as_millis() as u64,
-    );
-    tracing::Span::current().record("view.rows_affected", rows_affected);
-
-    info!(
-        view.name = "book_search_index",
-        view.refresh_duration_ms = refresh_duration.as_millis(),
-        view.rows_affected = rows_affected,
-        operation = "rebuild_search_index",
-        "Search index rebuild completed successfully"
-    );
-
-    Ok(())
-}
-
 fn spawn_startup_job<Fut>(job_name: &'static str, schedule: &'static str, future: Fut)
 where
     Fut: Future<Output = Result<()>> + Send + 'static,
@@ -441,41 +398,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bookapp_dal::models::{BookCreateInput, BookStatus};
-    use sqlx::PgPool;
-    use std::sync::Arc;
-
-    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
-    async fn test_rebuild_search_index_job(pool: PgPool) {
-        let repo = Arc::new(BookRepositoryImpl::single_pool(Arc::new(pool)));
-
-        // Create test data first
-        let test_book = BookCreateInput {
-            work_title: "Test Materialized View Book".to_string(),
-            primary_author_id: None,
-            primary_author_name: Some("Test Author".to_string()),
-            status: Some(BookStatus::Available),
-        };
-        repo.create(test_book).await.unwrap();
-
-        // Test the rebuild function
-        let result = rebuild_search_index(repo.clone()).await;
-        assert!(result.is_ok(), "Search index rebuild should succeed");
-
-        // Verify the materialized view has data after refresh
-        let search_results = repo
-            .full_text_search("Test Materialized", 10)
-            .await
-            .unwrap();
-        assert!(
-            !search_results.is_empty(),
-            "Search should find the test book after rebuild"
-        );
-        assert!(search_results
-            .iter()
-            .any(|r| r.work_title.contains("Test Materialized View Book")));
-    }
-
     #[test]
     fn test_scheduled_task_error_handling() {
         // Test that our error handling pattern is correctly structured
@@ -489,7 +411,7 @@ mod tests {
             Arc<BookRepositoryImpl>,
         ) -> std::pin::Pin<
             Box<dyn std::future::Future<Output = Result<()>> + Send>,
-        > = |repo| Box::pin(rebuild_search_index(repo));
+        > = |repo| Box::pin(generate_daily_statistics(repo));
 
         // Error handling pattern is correctly implemented - verified at compile-time
     }

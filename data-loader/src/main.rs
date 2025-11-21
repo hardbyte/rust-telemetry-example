@@ -137,10 +137,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     info!("✅ Bookapp client initialized with automatic tracing");
 
-    // Test connectivity first
-    // test_connectivity(&_bookapp_client).await?;
-    info!("⏩ Skipping connectivity test for now...");
-
     let books = generate_books(args.count, &args.dataset);
     info!("📚 Prepared {} books for ingestion", books.len());
 
@@ -239,29 +235,6 @@ async fn init_tracing(otlp_endpoint: &str) -> Result<(), Box<dyn std::error::Err
 
     info!("✅ Tracing initialized");
     Ok(())
-}
-
-#[tracing::instrument(skip(client))]
-async fn test_connectivity(
-    client: &BookappClient,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    info!("🔍 Testing connectivity to bookapp service");
-
-    match client.get_all_books().send().await {
-        Ok(response) => {
-            if response.status().is_success() {
-                info!("✅ Successfully connected to bookapp service");
-                Ok(())
-            } else {
-                error!("❌ Bookapp service returned error: {}", response.status());
-                Err(format!("Service returned status: {}", response.status()).into())
-            }
-        }
-        Err(e) => {
-            error!("❌ Failed to connect to bookapp service: {}", e);
-            Err(e.into())
-        }
-    }
 }
 
 fn generate_books(count: usize, mode: &DatasetMode) -> Vec<BookCreateIn> {
