@@ -56,9 +56,13 @@ impl DatabasePools {
 
         // Run migrations on write pool only
         debug!("Running migrations on write pool");
-        sqlx::migrate!("../bookapp-dal/migrations")
-            .run(write_pool.as_ref())
-            .await?;
+        let mut bookapp_migrator = sqlx::migrate!("../bookapp-dal/migrations");
+        bookapp_migrator.set_ignore_missing(true);
+        bookapp_migrator.run(write_pool.as_ref()).await?;
+        debug!("Running error injection migrations on write pool");
+        let mut error_injection_migrator = sqlx::migrate!("../error-injection-dal/migrations");
+        error_injection_migrator.set_ignore_missing(true);
+        error_injection_migrator.run(write_pool.as_ref()).await?;
 
         Ok(Self {
             write_pool,

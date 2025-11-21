@@ -51,8 +51,7 @@ services:
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_ENVIRONMENT: "development"
       SENTRY_RELEASE: "backend@1.0.0"
-    ports:
-      - "8000"
+      RUST_BACKTRACE: "1"
     depends_on:
       app:
         condition: service_healthy
@@ -154,13 +153,14 @@ services:
       RUST_BACKTRACE: "1"
       # DATABASE_URL is not strictly needed by this test unless tests evolve to touch DB directly
       # KAFKA_BROKER_URL is not strictly needed by this test
+      TRACE_PROPAGATION_WAIT_SECS: 10
     command: >
       sh -c "
-      echo 'Integration tester: Waiting for services to be fully up...' &&
-      sleep 15 &&
-      echo 'Integration tester: Starting tests...' &&
+      ./tests/wait-for-it.sh app 8000 -- echo \"App service is healthy, starting tests...\" &&
       cargo test --test telemetry_test -- --nocapture
       "
+    volumes:
+      - .:/usr/src/bookapp
     depends_on:
       app:
         condition: service_started

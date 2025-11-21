@@ -1,14 +1,14 @@
 #[cfg(test)]
 mod tests {
 
-    use crate::book_details::{BookDetailsProvider, StubBookDetailsProvider};
-    use crate::book_ingestion;
-    use crate::database::DatabasePools;
     use axum::{
         body::Body,
         http::{Request, StatusCode},
         Extension,
     };
+    use bookapp::book_details::{BookDetailsProvider, StubBookDetailsProvider};
+    use bookapp::book_ingestion;
+    use bookapp::database::DatabasePools;
     use bookapp_dal::models::BookCreateInput;
     use bookapp_dal::models::BookStatus;
     use bookapp_dal::repository::{
@@ -31,7 +31,7 @@ mod tests {
             read_pool: Arc::new(pool),
         };
         axum::Router::new()
-            .nest_service("/books", crate::rest::book_service())
+            .nest_service("/books", bookapp::rest::book_service())
             .layer(Extension(
                 Arc::new(StubBookDetailsProvider) as Arc<dyn BookDetailsProvider>
             ))
@@ -689,7 +689,7 @@ mod tests {
             write_pool: Arc::new(pool.clone()),
             read_pool: Arc::new(pool),
         };
-        crate::rest::api_router()
+        bookapp::rest::api_router()
             .layer(Extension(
                 Arc::new(StubBookDetailsProvider) as Arc<dyn BookDetailsProvider>
             ))

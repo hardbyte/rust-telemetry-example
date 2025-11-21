@@ -1,16 +1,8 @@
-mod book_details;
-#[allow(dead_code)]
-mod book_ingestion;
-mod database;
-
-mod error_injection_middleware;
-#[cfg(test)]
-mod observability_tests;
-mod reqwest_traced_client;
-mod rest;
-#[cfg(test)]
-mod rest_tests;
-mod topic_management;
+use bookapp::book_ingestion;
+use bookapp::database;
+use bookapp::error_injection_middleware;
+use bookapp::rest;
+use bookapp::topic_management;
 
 use std::{sync::Arc, time::Duration};
 
@@ -23,7 +15,7 @@ use sentry_tower::NewSentryLayer;
 use serde_json::{json, Value};
 use tokio::signal::unix::{signal, SignalKind};
 
-use crate::database::DatabasePools;
+use bookapp::database::DatabasePools;
 use error_injection_dal::ErrorInjectionRepository;
 
 use tracing::info;

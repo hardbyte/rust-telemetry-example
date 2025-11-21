@@ -13,9 +13,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     mv /usr/src/app/target/release/backend /backend
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget librdkafka-dev && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /backend /usr/local/bin/backend
 
-ENV RUST_LOG="info,sqlx=info,backend=debug"
+ENV RUST_LOG="debug,rdkafka=debug,sqlx=info,backend=trace"
 CMD ["backend"]

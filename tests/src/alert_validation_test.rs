@@ -32,6 +32,7 @@ const ERROR_RATIO_COOLDOWN_TARGET_RATIO: f64 = ERROR_RATIO_THRESHOLD * 0.5;
 const GRAFANA_ORG_ID: &str = "1";
 const ERROR_RATIO_THRESHOLD: f64 = 0.05; // 5%
 const LATENCY_P95_THRESHOLD_MS: f64 = 500.0; // 500ms
+const ERROR_RATIO_PROM_EXPR: &str = r#"(sum(rate(traces_spanmetrics_calls_total{status_code="STATUS_CODE_ERROR", service="bookapp"}[30s])) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service="bookapp"}[30s])), 0.001)) or on() vector(0)"#;
 
 // Test result types
 type TestResult<T> = Result<T, AlertTestError>;
@@ -100,13 +101,34 @@ struct AlertTestConfig {
 
 impl Default for AlertTestConfig {
     fn default() -> Self {
+        let telemetry_base_url = std::env::var("TELEMETRY_BASE_URL").ok();
+        let grafana_base_url = std::env::var("GRAFANA_BASE_URL")
+            .ok()
+            .or_else(|| telemetry_base_url.clone())
+            .unwrap_or_else(|| GRAFANA_BASE_URL.to_string());
+        let prometheus_base_url = std::env::var("PROMETHEUS_BASE_URL")
+            .ok()
+            .or_else(|| {
+                telemetry_base_url
+                    .as_ref()
+                    .map(|base| format!("{}/api/datasources/proxy/1", base.trim_end_matches('/')))
+            })
+            .unwrap_or_else(|| {
+                if grafana_base_url == GRAFANA_BASE_URL {
+                    PROMETHEUS_BASE_URL.to_string()
+                } else {
+                    format!(
+                        "{}/api/datasources/proxy/1",
+                        grafana_base_url.trim_end_matches('/')
+                    )
+                }
+            });
+
         Self {
             app_base_url: std::env::var("APP_BASE_URL")
                 .unwrap_or_else(|_| APP_BASE_URL.to_string()),
-            grafana_base_url: std::env::var("GRAFANA_BASE_URL")
-                .unwrap_or_else(|_| GRAFANA_BASE_URL.to_string()),
-            prometheus_base_url: std::env::var("PROMETHEUS_BASE_URL")
-                .unwrap_or_else(|_| PROMETHEUS_BASE_URL.to_string()),
+            grafana_base_url,
+            prometheus_base_url,
             timeout_duration: Duration::from_secs(
                 std::env::var("ALERT_TEST_TIMEOUT_SECS")
                     .ok()
@@ -571,9 +593,7 @@ async fn fetch_error_ratio(
     http_client: &HttpClient,
     config: &AlertTestConfig,
 ) -> TestResult<Option<f64>> {
-    let ratio_query = "(sum(rate(traces_spanmetrics_calls_total{status_code=\\\"STATUS_CODE_ERROR\\\", service=\\\"bookapp\\\"}[30s])) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\\\"bookapp\\\"}[30s])), 0.001)) or on() vector(0)";
-
-    let ratio = query_prometheus_scalar(http_client, config, ratio_query).await?;
+    let ratio = query_prometheus_scalar(http_client, config, ERROR_RATIO_PROM_EXPR).await?;
     Ok(Some(ratio))
 }
 
@@ -583,7 +603,7 @@ async fn is_alert_metric_firing(
     alert_title: &str,
 ) -> TestResult<bool> {
     let query = format!(
-        "(max(ALERTS{{alertname=\\\"{}\\\", alertstate=\\\"firing\\\"}}) or on() vector(0))",
+        "(max(ALERTS{{alertname=\"{}\", alertstate=\"firing\"}}) or on() vector(0))",
         alert_title
     );
 
@@ -707,7 +727,7 @@ impl ErrorRatioAlertTestRule {
                             "datasource": { "type": "prometheus", "uid": "prometheus" },
                             "editorMode": "code",
                             "exemplar": false,
-                            "expr": "(sum(rate(traces_spanmetrics_calls_total{status_code=\\\"STATUS_CODE_ERROR\\\", service=\\\"bookapp\\\"}[30s])) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\\\"bookapp\\\"}[30s])), 0.001)) or on() vector(0)",
+                            "expr": ERROR_RATIO_PROM_EXPR,
                             "instant": false,
                             "interval": "",
                             "intervalMs": 60000,

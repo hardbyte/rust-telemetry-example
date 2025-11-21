@@ -1,9 +1,6 @@
 use anyhow::Result;
 use backend::{book_ingestion, scheduled_tasks, search_refresh};
 use book_ingestion::OutboxPublisherConfig;
-use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
-use rdkafka::client::DefaultClientContext;
-use rdkafka::error::RDKafkaErrorCode::TopicAlreadyExists;
 use rdkafka::producer::FutureProducer;
 use rdkafka::ClientConfig;
 use std::sync::Arc;
@@ -15,6 +12,54 @@ use tracing::info;
 use bookapp_dal::BookRepositoryImpl;
 use sqlx::postgres::PgPoolOptions;
 use std::str::FromStr;
+
+async fn create_producer_with_retry(kafka_broker: &str) -> Result<FutureProducer> {
+    let mut attempts = 0;
+    let max_attempts = 30; // ~30 seconds with 1 second sleep
+    let retry_delay = Duration::from_secs(1);
+
+    loop {
+        attempts += 1;
+        tracing::info!(
+            "Attempt {}/{} to connect to Kafka brokers at {}",
+            attempts,
+            max_attempts,
+            kafka_broker
+        );
+
+        let producer_result = ClientConfig::new()
+            .set("bootstrap.servers", kafka_broker)
+            .set("message.timeout.ms", "5000")
+            .set("queue.buffering.max.ms", "50")
+            .create::<FutureProducer>();
+
+        match producer_result {
+            Ok(producer) => {
+                tracing::info!(
+                    "Successfully connected to Kafka after {} attempts.",
+                    attempts
+                );
+                return Ok(producer);
+            }
+            Err(error) => {
+                if attempts >= max_attempts {
+                    tracing::error!(
+                        ?error,
+                        "Failed to connect to Kafka after {} attempts.",
+                        max_attempts
+                    );
+                    return Err(anyhow::anyhow!("Failed to connect to Kafka: {error}"));
+                }
+                tracing::warn!(
+                    ?error,
+                    "Kafka connection failed, retrying in {:?}",
+                    retry_delay
+                );
+                tokio::time::sleep(retry_delay).await;
+            }
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -78,12 +123,8 @@ async fn main() -> Result<()> {
     // Kafka producer for outbox publishing
     let kafka_broker =
         std::env::var("KAFKA_BROKER_URL").unwrap_or_else(|_| "kafka:9092".to_string());
-    let producer: FutureProducer = ClientConfig::new()
-        .set("bootstrap.servers", &kafka_broker)
-        .set("message.timeout.ms", "5000")
-        .set("queue.buffering.max.ms", "50")
-        .create()
-        .expect("Failed to create Kafka producer");
+    let producer = create_producer_with_retry(&kafka_broker).await?;
+
     let dlq_topic =
         std::env::var("BOOK_INGESTION_DLQ_TOPIC").unwrap_or_else(|_| "book_ingestion.dlq".into());
 
@@ -101,43 +142,6 @@ async fn main() -> Result<()> {
                 .unwrap_or(5000),
         ),
     };
-
-    // Ensure Kafka topics exist (outbox and book_ingestion)
-    let outbox_topic = outbox_config
-        .default_topic
-        .clone()
-        .unwrap_or_else(|| "domain.events".to_string());
-    let admin_client: AdminClient<DefaultClientContext> = ClientConfig::new()
-        .set("bootstrap.servers", &kafka_broker)
-        .create()
-        .expect("Failed to create Kafka admin client");
-    let new_topics = vec![
-        NewTopic::new(&outbox_topic, 1, TopicReplication::Fixed(1)),
-        NewTopic::new("book_ingestion", 1, TopicReplication::Fixed(1)),
-        NewTopic::new(&dlq_topic, 1, TopicReplication::Fixed(1)),
-    ];
-    match admin_client
-        .create_topics(&new_topics, &AdminOptions::new())
-        .await
-    {
-        Ok(results) => {
-            for res in results {
-                match res {
-                    Ok(topic) => tracing::info!(%topic, "Created Kafka topic"),
-                    Err((topic, err)) => {
-                        if err == TopicAlreadyExists {
-                            tracing::info!(%topic, "Kafka topic already exists");
-                        } else {
-                            tracing::warn!(%topic, ?err, "Failed to create topic");
-                        }
-                    }
-                }
-            }
-        }
-        Err(e) => {
-            tracing::warn!(error = ?e, "Failed to create Kafka topics");
-        }
-    }
 
     // Start background services with cancellation support
     let (shutdown_tx, shutdown_rx) = watch::channel::<bool>(false);

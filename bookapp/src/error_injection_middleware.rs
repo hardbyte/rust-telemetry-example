@@ -316,7 +316,8 @@ pub async fn delete_config(
 /// use axum::{Router, Extension};
 /// use sqlx::PgPool;
 /// use error_injection_dal::ErrorInjectionRepository;
-/// use middleware::{error_injection_middleware, PostgresErrorInjectionConfigStore};
+/// use bookapp::error_injection_middleware::{error_injection_middleware, PostgresErrorInjectionConfigStore, ErrorInjectionConfigStore};
+/// use bookapp::database::DatabasePools;
 ///
 /// fn router(connection_pools: DatabasePools) -> Router {
 ///     // Create the ErrorInjectionConfigStore
@@ -329,8 +330,7 @@ pub async fn delete_config(
 ///
 ///     Router::new()
 ///         .layer(Extension(connection_pools))
-///         .layer(Extension(error_injection_store))
-///         .layer(axum::middleware::from_fn(error_injection_middleware))
+///         .layer(axum::middleware::from_fn_with_state(error_injection_store, error_injection_middleware))
 ///         // ... other routes and layers ...
 /// }
 /// ```

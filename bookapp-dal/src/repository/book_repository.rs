@@ -777,9 +777,9 @@ impl BookRepositoryImpl {
         fields(db.operation = "rebuild_search_index")
     )]
     pub async fn rebuild_search_index(&self) -> Result<u64> {
-        let pool = self.write_pool.as_ref();
+        let mut tx = self.write_pool.begin().await?;
         sqlx::query("TRUNCATE book_search_index")
-            .execute(pool)
+            .execute(tx.as_mut())
             .await?;
 
         let result = sqlx::query!(
@@ -831,9 +831,10 @@ impl BookRepositoryImpl {
             LEFT JOIN series_agg sa ON sa.work_id = w.id
             "#,
         )
-        .execute(pool)
+        .execute(tx.as_mut())
         .await?;
 
+        tx.commit().await?;
         Ok(result.rows_affected())
     }
 }

@@ -2,10 +2,21 @@ use std::time::Duration;
 use tokio::time::timeout;
 use uuid::Uuid;
 
+fn app_base_url() -> String {
+    std::env::var("APP_BASE_URL").unwrap_or_else(|_| "http://localhost:8000".to_string())
+}
+
+fn database_url() -> String {
+    std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "postgres://postgres:password@localhost:5432/bookapp".to_string()
+    })
+}
+
 /// Test API endpoint with invalid data
 #[tokio::test]
 async fn test_api_invalid_book_creation() {
     let client = reqwest::Client::new();
+    let base_url = app_base_url();
 
     // Test with empty title
     let invalid_book = serde_json::json!({
@@ -14,7 +25,7 @@ async fn test_api_invalid_book_creation() {
     });
 
     let response = client
-        .post("http://localhost:8000/books")
+        .post(format!("{}/books", base_url))
         .json(&invalid_book)
         .send()
         .await;
@@ -73,7 +84,7 @@ async fn test_resource_exhaustion() {
 /// Test malformed SQL injection attempts
 #[tokio::test]
 async fn test_sql_injection_protection() {
-    if let Ok(pool) = sqlx::PgPool::connect("postgres://postgres:password@localhost:5432/bookapp").await {
+    if let Ok(pool) = sqlx::PgPool::connect(&database_url()).await {
 
         // Attempt SQL injection in search query
         let malicious_query = "'; DROP TABLE books; --";
@@ -112,7 +123,7 @@ async fn test_network_timeouts() {
 /// Test concurrent database transactions
 #[tokio::test]
 async fn test_concurrent_transactions() {
-    if let Ok(pool) = sqlx::PgPool::connect("postgres://postgres:password@localhost:5432/bookapp").await {
+    if let Ok(pool) = sqlx::PgPool::connect(&database_url()).await {
 
         let tasks: Vec<_> = (0..10)
             .map(|i| {
@@ -164,9 +175,13 @@ async fn test_search_edge_cases() {
         ("x".repeat(1000).as_str(), "very long query"),
     ];
 
+    let base_url = app_base_url();
     for (query, description) in test_cases {
-        let url = format!("http://localhost:8000/books/search?q={}",
-                         urlencoding::encode(query));
+        let url = format!(
+            "{}/books/search?q={}",
+            base_url,
+            urlencoding::encode(query)
+        );
 
         let result = timeout(Duration::from_secs(5), client.get(&url).send()).await;
 
@@ -228,9 +243,10 @@ async fn test_graceful_degradation() {
     let tasks: Vec<_> = (0..50)
         .map(|i| {
             let client = client.clone();
+            let base_url = app_base_url();
             tokio::spawn(async move {
                 let response = client
-                    .get("http://localhost:8000/books")
+                    .get(format!("{}/books", base_url))
                     .send()
                     .await;
 
