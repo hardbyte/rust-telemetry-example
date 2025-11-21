@@ -12,10 +12,10 @@ The system consists of two Rust services, a separate data access layer (DAL), a 
 
 This is a Cargo workspace with the following crates:
 
-- **`bookapp`**: Main REST API service (port 8000) - handles HTTP requests, produces Kafka messages
+- **`bookapp`**: Main REST API service (HTTP on 8000; mapped dynamically when using Compose) - handles HTTP requests, produces Kafka messages
 - **`bookapp-dal`**: Data access layer with repository pattern, SQLx integration, and compile-time query verification
 - **`error-injection-dal`**: Dedicated DAL + migrations for the error injection middleware (owns the `error_injection` schema)
-- **`backend`**: Async message processor and background task scheduler - consumes Kafka messages, runs scheduled jobs, includes outbox publisher (console-subscriber on 6670)
+- **`backend`**: Async message processor and background task scheduler - consumes Kafka messages, runs scheduled jobs, includes outbox publisher (Tokio console is internal-only in Compose)
 - **`data-loader`**: Bulk data loading utility using the Progenitor client - demonstrates cross-service tracing for batch operations
 - **`client`**: Generated API client using Progenitor for type-safe service-to-service calls with automatic tracing integration
 - **`tests`**: Integration tests for end-to-end telemetry validation, including data-loader testing
@@ -121,8 +121,8 @@ This repository demonstrates several production-ready observability patterns:
 The **tracing** crate is used to instrument the application code. The `tracing-opentelemetry` crate exports this data to the 
 OpenTelemetry Collector. The implementation demonstrates context propagation for:
 
-- **HTTP**: Using `axum-tracing-opentelemetry` for server-side and `reqwest-tracing` for client-side propagation.
-- **Generated Client**: An OpenAPI-generated progenitor client is hooked to inject trace headers automatically.
+    - **HTTP**: Using `axum-tracing-opentelemetry` for server-side propagation.
+    - **Generated Client**: An OpenAPI-generated progenitor client injects trace headers automatically for service-to-service calls.
 - **Kafka**: Trace context is passed via message headers and used to create linked spans in the consumer.
 
 
@@ -270,22 +270,44 @@ For implementation details, see the `tokio-otel-metrics/` crate and `observabili
 # Optional: Configure Sentry integration
 cp .env.example .env
 # Edit .env to add your SENTRY_DSN if you want error tracking
-
+# Build the stack
 docker compose build
-docker compose --profile ci up
+
+# Start full stack with dynamic port mapping (preferred)
+docker compose up -d --wait
+
+# Discover mapped ports (needed for tests and alert validation)
+APP_PORT=$(docker compose port app 8000 | cut -d: -f2)
+GRAFANA_PORT=$(docker compose port telemetry 3000 | cut -d: -f2)
+OTLP_GRPC=$(docker compose port telemetry 4317 | cut -d: -f2)
+echo "API:     http://localhost:${APP_PORT}"
+echo "Grafana: http://localhost:${GRAFANA_PORT}"
+echo "OTLP:    http://localhost:${OTLP_GRPC}"
+
+# Export for integration/alert tests
+export APP_BASE_URL="http://localhost:${APP_PORT}"
+export GRAFANA_BASE_URL="http://localhost:${GRAFANA_PORT}"
+export PROMETHEUS_BASE_URL="http://localhost:${GRAFANA_PORT}/api/datasources/proxy/1"
+
+# Optional: enable OTLP span export for run_tests.sh
+# export RUN_TESTS_OTEL_ENDPOINT="auto"
+
+# Run full suite (fmt, clippy, unit + integration + alert validation)
+SQLX_OFFLINE=true ./run_tests.sh
 ```
 
 ### Docker Compose Profiles
 
 The project uses Docker Compose profiles to support different deployment scenarios:
 
-- **Default profile**: Full application stack (app, backend, database, Kafka, observability, integration tests)
+- **Default profile**: Full application stack (app, backend, database, Kafka, observability)
 - **CI profile**: Infrastructure for testing (database, Kafka, observability, integration tests)
 
 To run specific profiles:
 
 ```shell
-# Run full application stackdocker compose up -d
+# Run full application stack
+docker compose up -d
 
 # Run with test container
 docker compose --profile ci up
@@ -299,51 +321,51 @@ docker compose up db kafka telemetry
 
 ```http request
 ### GET all books
-GET http://localhost:8000/books
+GET ${APP_BASE_URL:-http://localhost:8000}/books
 Accept: application/json
 
 ### Authors - list/create
-GET http://localhost:8000/authors/
+GET ${APP_BASE_URL:-http://localhost:8000}/authors/
 Accept: application/json
 
-POST http://localhost:8000/authors/add
+POST ${APP_BASE_URL:-http://localhost:8000}/authors/add
 Content-Type: application/json
 
 {"name":"Test Author","sort_name":"Author, Test"}
 
 ### Works - create (appends outbox event)
-POST http://localhost:8000/works/add
+POST ${APP_BASE_URL:-http://localhost:8000}/works/add
 Content-Type: application/json
 
 {"title":"My Work","original_language":"en","publication_year":2024}
 
 ### Editions - create
-POST http://localhost:8000/editions/add
+POST ${APP_BASE_URL:-http://localhost:8000}/editions/add
 Content-Type: application/json
 
 {"work_id":1,"isbn":"9780000000000","title":"Edition Title"}
 
 ### Series - create and add work
-POST http://localhost:8000/series/add
+POST ${APP_BASE_URL:-http://localhost:8000}/series/add
 Content-Type: application/json
 
 {"name":"My Series"}
 
-POST http://localhost:8000/series/{id}/works/add
+POST ${APP_BASE_URL:-http://localhost:8000}/series/{id}/works/add
 Content-Type: application/json
 
 {"work_id":1,"primary_work":true,"order_id":1}
 
 ### Health check
-GET http://localhost:8000/health
+GET ${APP_BASE_URL:-http://localhost:8000}/health
 Accept: application/json
 
 ### Error injection configuration
-GET http://localhost:8000/error-injection
+GET ${APP_BASE_URL:-http://localhost:8000}/error-injection
 Accept: application/json
 ```
 
-Open Grafana at localhost:3000
+Open Grafana at http://localhost:${GRAFANA_PORT:-3000} (use `docker compose port telemetry 3000` to resolve in Compose)
 
 ## Open Library Loader (optional)
 
