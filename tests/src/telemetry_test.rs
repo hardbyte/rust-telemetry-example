@@ -1736,7 +1736,6 @@ async fn test_backend_workers_independent_traces() -> TestResult<()> {
     // Query for traces from different backend workers - all use service name "backend"
     // but have different root trace names for different operations
     let backend_workers = vec![
-        ("outbox_publish_cycle", "Outbox publisher worker"),
         ("publish_unpublished_events", "Domain event publishing"),
         ("book_ingestion_processing", "Kafka message processing"),
         (
@@ -1821,17 +1820,6 @@ async fn test_backend_workers_independent_traces() -> TestResult<()> {
                 root_trace_name
             );
         }
-    }
-
-    // Validate we found traces from the outbox publisher (most reliable worker)
-    let outbox_worker_found = found_workers
-        .iter()
-        .any(|(name, _)| name == "outbox_publish_cycle");
-    if !outbox_worker_found {
-        return Err(TestError::new(
-            "backend_outbox_traces_missing",
-            "Expected to find traces from outbox publisher worker".to_string(),
-        ));
     }
 
     println!("✅ Backend worker trace validation completed");

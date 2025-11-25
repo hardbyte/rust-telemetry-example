@@ -1,18 +1,19 @@
 use crate::error::{DalError, Result};
 use crate::models::{Edition, EditionCreateInput};
+use crate::TracedPgPool;
 use sqlx::{Executor, PgPool, Postgres};
 use std::sync::Arc;
 use tracing::{debug, instrument};
 use uuid::Uuid;
 
 pub struct EditionRepositoryImpl {
-    write_pool: Arc<PgPool>,
-    read_pool: Arc<PgPool>,
+    write_pool: Arc<TracedPgPool>,
+    read_pool: Arc<TracedPgPool>,
 }
 
 impl EditionRepositoryImpl {
-    /// Create repository with separate read and write pools
-    pub fn new(write_pool: Arc<PgPool>, read_pool: Arc<PgPool>) -> Self {
+    /// Create repository with separate read and write pools (traced for OTel)
+    pub fn new(write_pool: Arc<TracedPgPool>, read_pool: Arc<TracedPgPool>) -> Self {
         Self {
             write_pool,
             read_pool,
@@ -20,10 +21,25 @@ impl EditionRepositoryImpl {
     }
 
     /// Create repository with a single pool for both read and write operations
-    pub fn single_pool(pool: Arc<PgPool>) -> Self {
+    pub fn single_pool(pool: Arc<TracedPgPool>) -> Self {
         Self {
             write_pool: pool.clone(),
             read_pool: pool,
+        }
+    }
+
+    /// Create repository from untraced PgPool (for tests and backwards compatibility)
+    pub fn from_pg_pool(pool: Arc<PgPool>) -> Self {
+        use sqlx_tracing::PoolBuilder;
+        let traced = Arc::new(
+            PoolBuilder::from((*pool).clone())
+                .with_name("test-pool")
+                .with_database("bookapp")
+                .build(),
+        );
+        Self {
+            write_pool: traced.clone(),
+            read_pool: traced,
         }
     }
 
@@ -223,7 +239,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_create_and_find_by_id(pool: PgPool) {
-        let repo = EditionRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let repo = EditionRepositoryImpl::from_pg_pool(Arc::new(pool.clone()));
         let work_id = insert_work(&pool, "The Silmarillion").await;
 
         let id = repo
@@ -254,7 +270,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_find_by_isbn(pool: PgPool) {
-        let repo = EditionRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let repo = EditionRepositoryImpl::from_pg_pool(Arc::new(pool.clone()));
         let work_id = insert_work(&pool, "Dune").await;
 
         let isbn = "9780441172719";
@@ -281,7 +297,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_list_by_work(pool: PgPool) {
-        let repo = EditionRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let repo = EditionRepositoryImpl::from_pg_pool(Arc::new(pool.clone()));
         let work_id = insert_work(&pool, "1984").await;
 
         let _ = repo
@@ -320,7 +336,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_delete_edition(pool: PgPool) {
-        let repo = EditionRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let repo = EditionRepositoryImpl::from_pg_pool(Arc::new(pool.clone()));
         let work_id = insert_work(&pool, "Temp Work").await;
 
         let id = repo
@@ -344,7 +360,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_delete_nonexistent_edition(pool: PgPool) {
-        let repo = EditionRepositoryImpl::single_pool(Arc::new(pool));
+        let repo = EditionRepositoryImpl::from_pg_pool(Arc::new(pool));
         let res = repo.delete(Uuid::nil()).await;
         assert!(res.is_err());
     }

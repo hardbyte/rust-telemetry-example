@@ -2,37 +2,67 @@ use crate::error::{DalError, Result};
 use crate::models::{
     Book, BookCreateInput, BookFilterParams, BookSearchParams, BookSearchResult, BookStatus,
 };
+use crate::TracedPgPool;
 use sqlx::{Executor, PgPool, Postgres};
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
+/// Book repository with OpenTelemetry-instrumented database access
+///
+/// Uses sqlx-tracing to automatically create spans with semantic conventions
+/// for all database queries (db.system, db.name, db.statement, etc.)
 pub struct BookRepositoryImpl {
-    write_pool: Arc<PgPool>,
-    read_pool: Arc<PgPool>,
+    /// Traced pool for regular queries (creates OTel spans)
+    write_pool: Arc<TracedPgPool>,
+    read_pool: Arc<TracedPgPool>,
+    /// Raw pool for transactions (TracedPgPool doesn't support Deref to underlying pool)
+    raw_write_pool: Arc<PgPool>,
 }
 
 impl BookRepositoryImpl {
-    /// Create repository with separate read and write pools
-    pub fn new(write_pool: Arc<PgPool>, read_pool: Arc<PgPool>) -> Self {
+    /// Create repository with separate read and write pools (traced for OTel)
+    pub fn new(
+        write_pool: Arc<TracedPgPool>,
+        read_pool: Arc<TracedPgPool>,
+        raw_write_pool: Arc<PgPool>,
+    ) -> Self {
         Self {
             write_pool,
             read_pool,
+            raw_write_pool,
         }
     }
 
     /// Create repository with single pool for both read and write operations
-    pub fn single_pool(pool: Arc<PgPool>) -> Self {
+    pub fn single_pool(pool: Arc<TracedPgPool>, raw_pool: Arc<PgPool>) -> Self {
         Self {
             write_pool: pool.clone(),
             read_pool: pool,
+            raw_write_pool: raw_pool,
         }
     }
 
-    /// Get access to the write pool for administrative operations
-    pub fn write_pool(&self) -> &Arc<PgPool> {
-        &self.write_pool
+    /// Create repository from untraced PgPool (for tests and backwards compatibility)
+    pub fn from_pg_pool(pool: Arc<PgPool>) -> Self {
+        use sqlx_tracing::PoolBuilder;
+        let traced = Arc::new(
+            PoolBuilder::from((*pool).clone())
+                .with_name("test-pool")
+                .with_database("bookapp")
+                .build(),
+        );
+        Self {
+            write_pool: traced.clone(),
+            read_pool: traced,
+            raw_write_pool: pool,
+        }
+    }
+
+    /// Get access to the underlying PgPool for administrative operations
+    pub fn write_pool(&self) -> &PgPool {
+        &self.raw_write_pool
     }
 
     /// Executor-aware variant: find a book by id using a provided executor (pool or transaction)
@@ -66,6 +96,7 @@ impl BookRepositoryImpl {
     }
 
     /// Executor-aware variant: create a new book (normalized: works + authors + association)
+    /// Takes a sqlx::Transaction for transactional operations
     pub async fn create_with(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
@@ -80,7 +111,7 @@ impl BookRepositoryImpl {
             "#,
         )
         .bind(&input.work_title)
-        .fetch_one(tx.as_mut())
+        .fetch_one(&mut **tx)
         .await?;
 
         // 2) Resolve/create primary author
@@ -97,7 +128,7 @@ impl BookRepositoryImpl {
                 "#,
             )
             .bind(&name)
-            .fetch_one(tx.as_mut())
+            .fetch_one(&mut **tx)
             .await?
         } else {
             return Err(crate::error::DalError::InvalidInput {
@@ -116,7 +147,7 @@ impl BookRepositoryImpl {
         )
         .bind(work_id)
         .bind(author_id)
-        .execute(tx.as_mut())
+        .execute(&mut **tx)
         .await?;
 
         Ok(work_id)
@@ -167,6 +198,7 @@ impl BookRepositoryImpl {
     }
 
     /// Executor-aware variant: bulk create books (normalized: per-item create)
+    /// Takes a sqlx::Transaction for transactional operations
     pub async fn bulk_create_with(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
@@ -212,7 +244,7 @@ impl BookRepositoryImpl {
             "#,
             &titles
         )
-        .fetch_all(tx.as_mut())
+        .fetch_all(&mut **tx)
         .await?
         .into_iter()
         .map(|row| row.id)
@@ -243,7 +275,7 @@ impl BookRepositoryImpl {
                 "#,
                 &name_vec
             )
-            .fetch_all(tx.as_mut())
+            .fetch_all(&mut **tx)
             .await?;
 
             for row in rows {
@@ -281,7 +313,7 @@ impl BookRepositoryImpl {
         )
         .bind(&inserted_work_ids)
         .bind(&resolved_author_ids)
-        .execute(tx.as_mut())
+        .execute(&mut **tx)
         .await?;
 
         Ok(inserted_work_ids)
@@ -418,7 +450,8 @@ impl BookRepositoryImpl {
 
     #[tracing::instrument(name = "create_work_with_primary_author", skip(self, input), fields(work.title = %input.work_title, db.operation.name = "insert", db.collection.name = "works", db.namespace = "bookapp", db.system.name = "postgresql"))]
     pub async fn create(&self, input: BookCreateInput) -> Result<Uuid> {
-        let mut tx = self.write_pool.begin().await?;
+        // Use raw pool for transactions (TracedPgPool for non-tx queries)
+        let mut tx = self.raw_write_pool.begin().await?;
         let work_id = self.create_with(&mut tx, input).await?;
         tx.commit().await?;
         Ok(work_id)
@@ -440,8 +473,8 @@ impl BookRepositoryImpl {
             return Ok(Vec::new());
         }
 
-        // Use a single transaction to atomically create all works + author associations
-        let mut tx = self.write_pool.begin().await?;
+        // Use raw pool for transactions (TracedPgPool for non-tx queries)
+        let mut tx = self.raw_write_pool.begin().await?;
 
         let ids = self.bulk_create_with(&mut tx, books).await?;
 
@@ -777,9 +810,10 @@ impl BookRepositoryImpl {
         fields(db.operation = "rebuild_search_index")
     )]
     pub async fn rebuild_search_index(&self) -> Result<u64> {
-        let mut tx = self.write_pool.begin().await?;
+        // Use raw pool for transactions
+        let mut tx = self.raw_write_pool.begin().await?;
         sqlx::query("TRUNCATE book_search_index")
-            .execute(tx.as_mut())
+            .execute(&mut *tx)
             .await?;
 
         let result = sqlx::query!(
@@ -831,7 +865,7 @@ impl BookRepositoryImpl {
             LEFT JOIN series_agg sa ON sa.work_id = w.id
             "#,
         )
-        .execute(tx.as_mut())
+        .execute(&mut *tx)
         .await?;
 
         tx.commit().await?;
@@ -847,7 +881,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_find_all_books(pool: PgPool) {
-        let repo = BookRepositoryImpl::single_pool(Arc::new(pool));
+        let repo = BookRepositoryImpl::from_pg_pool(Arc::new(pool));
 
         // Create a test book first since there's no seed data
         let input = BookCreateInput {
@@ -865,7 +899,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_list_book_ids(pool: PgPool) {
-        let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let repo = BookRepositoryImpl::from_pg_pool(Arc::new(pool.clone()));
 
         let input = BookCreateInput {
             work_title: "ID List Book".to_string(),
@@ -885,7 +919,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_create_and_find_book(pool: PgPool) {
-        let repo = BookRepositoryImpl::single_pool(Arc::new(pool));
+        let repo = BookRepositoryImpl::from_pg_pool(Arc::new(pool));
 
         let input = BookCreateInput {
             work_title: "Test Book".to_string(),
@@ -908,7 +942,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_update_book(pool: PgPool) {
-        let repo = BookRepositoryImpl::single_pool(Arc::new(pool));
+        let repo = BookRepositoryImpl::from_pg_pool(Arc::new(pool));
 
         // Create a book first
         let input = BookCreateInput {
@@ -934,7 +968,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_delete_book(pool: PgPool) {
-        let repo = BookRepositoryImpl::single_pool(Arc::new(pool));
+        let repo = BookRepositoryImpl::from_pg_pool(Arc::new(pool));
 
         // Create a book first
         let input = BookCreateInput {
@@ -957,7 +991,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_bulk_create(pool: PgPool) {
-        let repo = BookRepositoryImpl::single_pool(Arc::new(pool));
+        let repo = BookRepositoryImpl::from_pg_pool(Arc::new(pool));
 
         let books = vec![
             BookCreateInput {
@@ -992,7 +1026,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_find_by_filters(pool: PgPool) {
-        let repo = BookRepositoryImpl::single_pool(Arc::new(pool));
+        let repo = BookRepositoryImpl::from_pg_pool(Arc::new(pool));
 
         // Create test books
         let test_books = vec![
@@ -1036,7 +1070,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_search_books(pool: PgPool) {
-        let repo = BookRepositoryImpl::single_pool(Arc::new(pool));
+        let repo = BookRepositoryImpl::from_pg_pool(Arc::new(pool));
 
         // Create a test book with unique content
         let unique_title = "Unique Search Test Book";
@@ -1069,7 +1103,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_full_text_search(pool: PgPool) {
-        let repo = BookRepositoryImpl::single_pool(Arc::new(pool));
+        let repo = BookRepositoryImpl::from_pg_pool(Arc::new(pool));
 
         // Create test data that will be indexed in the materialized view
         let test_books = vec![

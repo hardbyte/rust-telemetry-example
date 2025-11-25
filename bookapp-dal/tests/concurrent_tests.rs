@@ -7,7 +7,7 @@ use sqlx::PgPool;
 use tokio::sync::Semaphore;
 
 fn repository_from(pool: &PgPool) -> Arc<BookRepositoryImpl> {
-    Arc::new(BookRepositoryImpl::single_pool(Arc::new(pool.clone())))
+    Arc::new(BookRepositoryImpl::from_pg_pool(Arc::new(pool.clone())))
 }
 
 #[sqlx::test(migrations = "./migrations")]

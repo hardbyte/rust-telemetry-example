@@ -13,7 +13,7 @@ The system consists of two Rust services, a separate data access layer (DAL), a 
 This is a Cargo workspace with the following crates:
 
 - **`bookapp`**: Main REST API service (HTTP on 8000; mapped dynamically when using Compose) - handles HTTP requests, produces Kafka messages
-- **`bookapp-dal`**: Data access layer with repository pattern, SQLx integration, and compile-time query verification
+- **`bookapp-dal`**: Data access layer with repository pattern, SQLx integration with automatic OpenTelemetry instrumentation via `sqlx-tracing`, and compile-time query verification
 - **`error-injection-dal`**: Dedicated DAL + migrations for the error injection middleware (owns the `error_injection` schema)
 - **`backend`**: Async message processor and background task scheduler - consumes Kafka messages, runs scheduled jobs, includes outbox publisher (Tokio console is internal-only in Compose)
 - **`data-loader`**: Bulk data loading utility using the Progenitor client - demonstrates cross-service tracing for batch operations
@@ -100,7 +100,7 @@ This repository demonstrates several production-ready observability patterns:
 
 - **Distributed Tracing**: End-to-end tracing across multiple services and protocols:
     - **HTTP**: The `axum` web framework is instrumented to create and propagate trace context.
-    - **Database**: `sqlx` database calls are traced to monitor query performance via the dedicated DAL crate.
+    - **Database**: All SQLx database operations are automatically traced with OpenTelemetry semantic conventions (`db.system`, `db.name`, `db.statement`) using the `sqlx-tracing` crate, which wraps connection pools to create spans for every query execution.
     - **Generated Client**: An OpenAPI-generated progenitor client is instrumented to propagate context automatically.
     - **Message Queue (Kafka)**: Trace context is injected into Kafka message headers and used to create linked spans in the consumer, correctly modeling the asynchronous workflow.
 
@@ -110,6 +110,9 @@ This repository demonstrates several production-ready observability patterns:
 - **Configurable Error Injection**: A middleware is included that can be configured at runtime to inject errors for specific API endpoints. This is a powerful tool for testing system resilience, alerts, and error-tracking integrations.
 - **Instrumented Load Testing**: The included Locust load testing script is itself instrumented with OpenTelemetry, allowing you to trace requests originating from the load generator all the way through the system.
 - **Health Monitoring**: Dedicated `/health` endpoint for application health checks, monitored by OpenTelemetry Collector's httpcheck receiver without generating traces, keeping observability data clean.
+- **Tracing the “bad paths”**: Two intentionally inefficient N+1 endpoints demonstrate trace clarity for problematic code paths:
+    - `/books/nplus1/db` performs sequential DB lookups.
+    - `/books/nplus1/api` performs sequential HTTP calls (with trace context propagation). Override `base_url` if the service is running on a non-default port.
 
 
 ![dashboard.png](.github/dashboard.png)
@@ -323,6 +326,10 @@ docker compose up db kafka telemetry
 ### GET all books
 GET ${APP_BASE_URL:-http://localhost:8000}/books
 Accept: application/json
+
+### N+1 tracing demos (intentionally inefficient)
+GET ${APP_BASE_URL:-http://localhost:8000}/books/nplus1/db?limit=5
+GET ${APP_BASE_URL:-http://localhost:8000}/books/nplus1/api?limit=5&base_url=${APP_BASE_URL:-http://localhost:8000}
 
 ### Authors - list/create
 GET ${APP_BASE_URL:-http://localhost:8000}/authors/
@@ -585,9 +592,10 @@ The `bookapp-dal` crate implements a clean separation between business logic and
 
 #### Error Handling & Observability
 - **Custom Error Types**: Structured `DalError` with specific error categories
-- **Automatic Instrumentation**: SQLx operations traced via OpenTelemetry
+- **Automatic SQLx Tracing**: All database operations automatically create OpenTelemetry spans via `sqlx-tracing` with semantic conventions (`db.system="postgresql"`, `db.name`, `db.statement`, etc.)
+- **Traced Connection Pools**: `TracedPgPool` type alias wraps `sqlx_tracing::Pool<sqlx::Postgres>` for zero-overhead instrumentation
 - **Connection Health**: Pool monitoring and connection lifecycle management
-- **Query Performance**: Automatic query timing and performance metrics
+- **Query Performance**: Automatic query timing and performance metrics exported to Tempo
 
 ### Repository Examples
 

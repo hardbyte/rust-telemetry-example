@@ -14,6 +14,7 @@ services:
       SENTRY_RELEASE: "bookapp@1.0.0"
       DATABASE_POOL_MAX_CONNECTIONS: "48"
       DATABASE_POOL_MIN_CONNECTIONS: "12"
+      RUST_BACKTRACE: "1"
     ports:
       - "8000"
       - "6669"

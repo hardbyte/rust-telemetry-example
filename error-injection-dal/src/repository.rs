@@ -1,4 +1,5 @@
 use crate::models::{ErrorInjectionConfig, ErrorInjectionConfigInput};
+use crate::TracedPgPool;
 use sqlx::{Executor, PgPool, Postgres};
 use std::sync::Arc;
 use tracing::{instrument, Level};
@@ -7,22 +8,37 @@ pub type Result<T> = std::result::Result<T, sqlx::Error>;
 
 #[derive(Clone)]
 pub struct ErrorInjectionRepository {
-    write_pool: Arc<PgPool>,
-    read_pool: Arc<PgPool>,
+    write_pool: Arc<TracedPgPool>,
+    read_pool: Arc<TracedPgPool>,
 }
 
 impl ErrorInjectionRepository {
-    pub fn new(write_pool: Arc<PgPool>, read_pool: Arc<PgPool>) -> Self {
+    pub fn new(write_pool: Arc<TracedPgPool>, read_pool: Arc<TracedPgPool>) -> Self {
         Self {
             write_pool,
             read_pool,
         }
     }
 
-    pub fn single_pool(pool: Arc<PgPool>) -> Self {
+    pub fn single_pool(pool: Arc<TracedPgPool>) -> Self {
         Self {
             write_pool: pool.clone(),
             read_pool: pool,
+        }
+    }
+
+    /// Create repository from untraced PgPool (for tests and backwards compatibility)
+    pub fn from_pg_pool(pool: Arc<PgPool>) -> Self {
+        use sqlx_tracing::PoolBuilder;
+        let traced = Arc::new(
+            PoolBuilder::from((*pool).clone())
+                .with_name("error-injection-pool")
+                .with_database("bookapp")
+                .build(),
+        );
+        Self {
+            write_pool: traced.clone(),
+            read_pool: traced,
         }
     }
 

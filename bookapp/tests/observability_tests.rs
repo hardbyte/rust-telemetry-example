@@ -217,10 +217,7 @@ mod observability_tests {
     async fn setup_observability_test_app(pool: PgPool) -> axum::Router {
         dotenv().ok();
         let producer: FutureProducer = bookapp::book_ingestion::create_producer().unwrap();
-        let db_pools = DatabasePools {
-            write_pool: Arc::new(pool.clone()),
-            read_pool: Arc::new(pool),
-        };
+        let db_pools = DatabasePools::from_pg_pool(pool);
 
         bookapp::rest::api_router()
             .layer(Extension(

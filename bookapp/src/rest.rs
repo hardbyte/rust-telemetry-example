@@ -1,13 +1,13 @@
-use crate::database::DatabasePools;
+use crate::{database::DatabasePools, reqwest_traced_client};
 use axum::extract::{Path, Query};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
-use bookapp_dal::models::BookStatus;
 use bookapp_dal::models::{
     Author, AuthorCreateInput, BookCreateInput, BookSearchResult, EditionCreateInput,
     EventCreateInput, SeriesCreateInput, SeriesWorksAssociationCreateInput, WorkCreateInput,
 };
+use bookapp_dal::models::{BookFilterParams, BookStatus};
 use bookapp_dal::repository::{
     AuthorRepositoryImpl, EditionRepositoryImpl, EventRepositoryImpl, SeriesRepositoryImpl,
     WorkRepositoryImpl,
@@ -28,6 +28,8 @@ const MAX_SEARCH_LIMIT: i64 = 50;
 const SHORT_QUERY_LIMIT: i64 = 10;
 const LETTER_CACHE_TTL_SECS: u64 = 5;
 const LETTER_CACHE_MAX_ENTRIES: u64 = 1024;
+const DEFAULT_NPLUS1_LIMIT: usize = 5;
+const DEFAULT_NPLUS1_BASE_URL: &str = "http://127.0.0.1:8000";
 
 static LETTER_SEARCH_CACHE: Lazy<Cache<String, Vec<BookSearchResult>>> = Lazy::new(|| {
     Cache::builder()
@@ -52,6 +54,10 @@ const fn default_books_limit() -> i64 {
     DEFAULT_BOOKS_LIMIT
 }
 
+const fn default_nplus1_limit() -> usize {
+    DEFAULT_NPLUS1_LIMIT
+}
+
 #[derive(Debug, Clone)]
 struct Pagination {
     limit: i64,
@@ -73,6 +79,14 @@ impl From<&ListBooksParams> for Pagination {
             clamped,
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct NPlusOneParams {
+    #[serde(default = "default_nplus1_limit")]
+    limit: usize,
+    #[serde(default)]
+    base_url: Option<String>,
 }
 
 impl Pagination {
@@ -144,7 +158,11 @@ async fn get_all_books(
     tracing::Span::current().record("books.limit_clamped", pagination.clamped);
     tracing::info!("Listing books with pagination");
 
-    let repo = BookRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
+    let repo = BookRepositoryImpl::new(
+        db_pools.write_pool.clone(),
+        db_pools.read_pool.clone(),
+        db_pools.write_pg_pool(),
+    );
     match repo.find_all(pagination.limit, pagination.after).await {
         Ok(books) => {
             tracing::Span::current().record("num_books", books.len() as i64);
@@ -196,7 +214,11 @@ async fn get_book_ids(
     tracing::Span::current().record("books.limit_clamped", pagination.clamped);
     tracing::info!("Listing book IDs with pagination");
 
-    let repo = BookRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
+    let repo = BookRepositoryImpl::new(
+        db_pools.write_pool.clone(),
+        db_pools.read_pool.clone(),
+        db_pools.write_pg_pool(),
+    );
     match repo.list_ids(pagination.limit, pagination.after).await {
         Ok(ids) => {
             tracing::Span::current().record("books.ids_returned", ids.len() as i64);
@@ -254,7 +276,11 @@ async fn get_book(
     // Increment counter with low-cardinality dimensions (e.g., operation type)
     counter.add(1, &[opentelemetry::KeyValue::new("operation", "get_book")]);
 
-    let repo = BookRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
+    let repo = BookRepositoryImpl::new(
+        db_pools.write_pool.clone(),
+        db_pools.read_pool.clone(),
+        db_pools.write_pg_pool(),
+    );
     match repo.find_by_id(id).await {
         Ok(Some(book)) => {
             span.record("http.response.status_code", 200);
@@ -288,7 +314,11 @@ async fn delete_book(
     Extension(db_pools): Extension<DatabasePools>,
     Path(id): Path<Uuid>,
 ) -> Result<(), StatusCode> {
-    let repo = BookRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
+    let repo = BookRepositoryImpl::new(
+        db_pools.write_pool.clone(),
+        db_pools.read_pool.clone(),
+        db_pools.write_pg_pool(),
+    );
     match repo.delete(id).await {
         Ok(()) => Ok(()),
         Err(_) => Err(StatusCode::NOT_FOUND),
@@ -314,7 +344,11 @@ async fn update_book(
     Path(id): Path<Uuid>,
     Json(book_data): Json<BookCreateInput>,
 ) -> Result<Json<i32>, StatusCode> {
-    let repo = BookRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
+    let repo = BookRepositoryImpl::new(
+        db_pools.write_pool.clone(),
+        db_pools.read_pool.clone(),
+        db_pools.write_pg_pool(),
+    );
 
     let span = tracing::Span::current();
     span.record("url.path", format!("/books/{}", id));
@@ -367,12 +401,17 @@ async fn create_book(
     Extension(_producer): Extension<FutureProducer>,
     Json(book): Json<BookCreateInput>,
 ) -> Result<(StatusCode, Json<Uuid>), StatusCode> {
-    let book_repo =
-        BookRepositoryImpl::new(db_pools.write_pool.clone(), db_pools.read_pool.clone());
-    let event_repo = EventRepositoryImpl::new(db_pools.write_pool.clone(), db_pools.read_pool);
+    let book_repo = BookRepositoryImpl::new(
+        db_pools.write_pool.clone(),
+        db_pools.read_pool.clone(),
+        db_pools.write_pg_pool(),
+    );
+    let event_repo =
+        EventRepositoryImpl::new(db_pools.write_pool.clone(), db_pools.read_pool.clone());
 
+    // Use raw pool for transactions (TracedPgPool doesn't expose commit)
     let mut tx = db_pools
-        .write_pool
+        .write_pg_pool()
         .begin()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -414,7 +453,11 @@ async fn bulk_create_books(
     let num = payload.len() as i64;
     tracing::Span::current().record("num_books", num);
 
-    let repo = BookRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
+    let repo = BookRepositoryImpl::new(
+        db_pools.write_pool.clone(),
+        db_pools.read_pool.clone(),
+        db_pools.write_pg_pool(),
+    );
     match repo.bulk_create(&payload).await {
         Ok(ids) => Ok((StatusCode::CREATED, Json(ids))),
         Err(e) => {
@@ -424,11 +467,105 @@ async fn bulk_create_books(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/books/nplus1/db",
+    params(
+        ("limit" = usize, Query, description = "Number of books to fetch via sequential DB lookups", minimum = 1, maximum = 50)
+    ),
+    responses(
+        (status = 200, description = "Books fetched via N+1 database calls", body = [Book]),
+        (status = 500, description = "Failed to execute sequential DB fetches")
+    ),
+    tag = "Books"
+)]
+async fn nplus1_db(
+    Query(params): Query<NPlusOneParams>,
+    Extension(db_pools): Extension<DatabasePools>,
+) -> Result<Json<Vec<Book>>, StatusCode> {
+    let repo = BookRepositoryImpl::new(
+        db_pools.write_pool.clone(),
+        db_pools.read_pool.clone(),
+        db_pools.write_pg_pool(),
+    );
+    let seeds = repo
+        .find_by_filters(BookFilterParams {
+            limit: Some(params.limit as i64),
+            ..Default::default()
+        })
+        .await
+        .map_err(|err| {
+            tracing::error!(error = %err, "Failed to seed N+1 DB fetch");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let seed_ids: Vec<Uuid> = seeds.iter().map(|book| book.id).collect();
+    let fetched = reqwest_traced_client::fetch_books_sequential_from_db(&repo, &seed_ids)
+        .await
+        .map_err(|err| {
+            tracing::error!(error = %err, "Sequential DB fetch failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(fetched))
+}
+
+#[utoipa::path(
+    get,
+    path = "/books/nplus1/api",
+    params(
+        ("limit" = usize, Query, description = "Number of books to fetch via sequential API calls", minimum = 1, maximum = 50),
+        ("base_url" = String, Query, description = "Override base URL for outbound API calls (defaults to NPLUS_ONE_BASE_URL or http://127.0.0.1:8000)")
+    ),
+    responses(
+        (status = 200, description = "Books fetched via N+1 API calls with tracing", body = [Book]),
+        (status = 502, description = "Upstream API call failed"),
+        (status = 500, description = "Failed to seed N+1 API fetch")
+    ),
+    tag = "Books"
+)]
+async fn nplus1_api(
+    Query(params): Query<NPlusOneParams>,
+    Extension(db_pools): Extension<DatabasePools>,
+) -> Result<Json<Vec<Book>>, StatusCode> {
+    let repo = BookRepositoryImpl::new(
+        db_pools.write_pool.clone(),
+        db_pools.read_pool.clone(),
+        db_pools.write_pg_pool(),
+    );
+    let seeds = repo
+        .find_by_filters(BookFilterParams {
+            limit: Some(params.limit as i64),
+            ..Default::default()
+        })
+        .await
+        .map_err(|err| {
+            tracing::error!(error = %err, "Failed to seed N+1 API fetch");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let base_url = params.base_url.unwrap_or_else(|| {
+        std::env::var("NPLUS_ONE_BASE_URL").unwrap_or_else(|_| DEFAULT_NPLUS1_BASE_URL.to_string())
+    });
+    let seed_ids: Vec<Uuid> = seeds.iter().map(|book| book.id).collect();
+
+    let fetched = reqwest_traced_client::fetch_books_sequential_via_api(&base_url, &seed_ids)
+        .await
+        .map_err(|err| {
+            tracing::warn!(error = %err, %base_url, "Sequential API fetch failed");
+            StatusCode::BAD_GATEWAY
+        })?;
+
+    Ok(Json(fetched))
+}
+
 pub fn book_service() -> Router {
     Router::new()
         .route("/", get(get_all_books))
         .route("/id_list", get(get_book_ids))
         .route("/search", get(search_books))
+        .route("/nplus1/db", get(nplus1_db))
+        .route("/nplus1/api", get(nplus1_api))
         .route("/add", post(create_book))
         .route("/bulk_add", post(bulk_create_books))
         .route(
@@ -477,8 +614,9 @@ async fn create_work(
     let event_repo =
         EventRepositoryImpl::new(db_pools.write_pool.clone(), db_pools.read_pool.clone());
 
+    // Use raw pool for transactions (TracedPgPool doesn't expose commit)
     let mut tx = db_pools
-        .write_pool
+        .write_pg_pool()
         .begin()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -674,7 +812,11 @@ async fn search_books(
 
     tracing::info!(search.query = %effective_query, search.limit = effective_limit, "Processing book search request");
 
-    let repo = BookRepositoryImpl::new(db_pools.write_pool, db_pools.read_pool);
+    let repo = BookRepositoryImpl::new(
+        db_pools.write_pool.clone(),
+        db_pools.read_pool.clone(),
+        db_pools.write_pg_pool(),
+    );
     let mut cache_status = "miss";
     let mut recorded_cache_metric = false;
     let cache_key = if should_cache {

@@ -1,18 +1,19 @@
 use crate::error::{DalError, Result};
 use crate::models::{Author, AuthorCreateInput};
+use crate::TracedPgPool;
 use sqlx::{Executor, PgPool, Postgres};
 use std::sync::Arc;
 use tracing::{debug, instrument, warn};
 use uuid::Uuid;
 
 pub struct AuthorRepositoryImpl {
-    write_pool: Arc<PgPool>,
-    read_pool: Arc<PgPool>,
+    write_pool: Arc<TracedPgPool>,
+    read_pool: Arc<TracedPgPool>,
 }
 
 impl AuthorRepositoryImpl {
-    /// Create repository with separate read and write pools
-    pub fn new(write_pool: Arc<PgPool>, read_pool: Arc<PgPool>) -> Self {
+    /// Create repository with separate read and write pools (traced for OTel)
+    pub fn new(write_pool: Arc<TracedPgPool>, read_pool: Arc<TracedPgPool>) -> Self {
         Self {
             write_pool,
             read_pool,
@@ -20,10 +21,25 @@ impl AuthorRepositoryImpl {
     }
 
     /// Create repository with a single pool for both read and write operations
-    pub fn single_pool(pool: Arc<PgPool>) -> Self {
+    pub fn single_pool(pool: Arc<TracedPgPool>) -> Self {
         Self {
             write_pool: pool.clone(),
             read_pool: pool,
+        }
+    }
+
+    /// Create repository from untraced PgPool (for tests and backwards compatibility)
+    pub fn from_pg_pool(pool: Arc<PgPool>) -> Self {
+        use sqlx_tracing::PoolBuilder;
+        let traced = Arc::new(
+            PoolBuilder::from((*pool).clone())
+                .with_name("test-pool")
+                .with_database("bookapp")
+                .build(),
+        );
+        Self {
+            write_pool: traced.clone(),
+            read_pool: traced,
         }
     }
 
@@ -193,7 +209,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_create_and_find_author(pool: PgPool) {
-        let repo = AuthorRepositoryImpl::single_pool(Arc::new(pool));
+        let repo = AuthorRepositoryImpl::from_pg_pool(Arc::new(pool));
 
         let input = AuthorCreateInput {
             name: "J. R. R. Tolkien".to_string(),
@@ -214,7 +230,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_find_all_authors(pool: PgPool) {
-        let repo = AuthorRepositoryImpl::single_pool(Arc::new(pool));
+        let repo = AuthorRepositoryImpl::from_pg_pool(Arc::new(pool));
 
         // Seed a couple of authors
         let _ = repo
@@ -242,7 +258,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_update_author(pool: PgPool) {
-        let repo = AuthorRepositoryImpl::single_pool(Arc::new(pool));
+        let repo = AuthorRepositoryImpl::from_pg_pool(Arc::new(pool));
 
         let id = repo
             .create(AuthorCreateInput {
@@ -266,7 +282,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_delete_author(pool: PgPool) {
-        let repo = AuthorRepositoryImpl::single_pool(Arc::new(pool));
+        let repo = AuthorRepositoryImpl::from_pg_pool(Arc::new(pool));
 
         let id = repo
             .create(AuthorCreateInput {
@@ -288,7 +304,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_delete_nonexistent_author(pool: PgPool) {
-        let repo = AuthorRepositoryImpl::single_pool(Arc::new(pool));
+        let repo = AuthorRepositoryImpl::from_pg_pool(Arc::new(pool));
         let res = repo.delete(Uuid::nil()).await;
         assert!(res.is_err());
     }

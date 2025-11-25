@@ -11,6 +11,7 @@ use tracing::info;
 
 use bookapp_dal::BookRepositoryImpl;
 use sqlx::postgres::PgPoolOptions;
+use sqlx_tracing::PoolBuilder as TracedPoolBuilder;
 use std::str::FromStr;
 
 async fn create_producer_with_retry(kafka_broker: &str) -> Result<FutureProducer> {
@@ -85,13 +86,21 @@ async fn main() -> Result<()> {
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(32);
-    let db_pool = PgPoolOptions::new()
+    let raw_pool = PgPoolOptions::new()
         .max_connections(max_connections)
         .connect(&db_url)
         .await?;
     info!(max_connections, "Created backend database pool");
 
-    let db_pool = Arc::new(db_pool);
+    // Keep raw pool for transactions, wrap a clone for traced queries
+    let raw_db_pool = Arc::new(raw_pool.clone());
+    let traced_pool = TracedPoolBuilder::from(raw_pool)
+        .with_name("backend-pool")
+        .with_database("bookapp")
+        .with_host("db")
+        .with_port(5432)
+        .build();
+    let db_pool = Arc::new(traced_pool);
 
     // Start tokio runtime metrics collection
     let _tokio_metrics_handle =
@@ -102,7 +111,11 @@ async fn main() -> Result<()> {
         observability_utils::start_task_metrics(&observability_config, &meter_provider);
 
     // Create repository for database operations
-    let book_repository = Arc::new(BookRepositoryImpl::new(db_pool.clone(), db_pool.clone()));
+    let book_repository = Arc::new(BookRepositoryImpl::new(
+        db_pool.clone(),
+        db_pool.clone(),
+        raw_db_pool.clone(),
+    ));
 
     // Configure smart search refresher
     let min_interval_secs = std::env::var("SEARCH_REFRESH_MIN_INTERVAL_SECS")
@@ -199,7 +212,7 @@ async fn main() -> Result<()> {
 
     let mut outbox_task = tokio::spawn({
         let mut rx = shutdown_rx.clone();
-        let pool = db_pool.clone();
+        let pool = raw_db_pool.clone();
         let producer = producer.clone();
         let config = outbox_config.clone();
         async move {

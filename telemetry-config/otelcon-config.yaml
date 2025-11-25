@@ -55,7 +55,7 @@ receivers:
     initial_delay: 5s
     queries:
       - sql: |-
-          select count(*) as count from books
+          select count(*) as count from works
         metrics:
           - metric_name: bt.sql_books_count
             value_column: "count"
@@ -242,8 +242,7 @@ service:
         - httpcheck/app
         - hostmetrics
       processors: [memory_limiter, batch]
-      exporters: [otlphttp/metrics]
-
+      exporters: [otlphttp/metrics, debug/metrics]
     metrics/counts:
       receivers: [count]
       processors: [deltatocumulative, batch]

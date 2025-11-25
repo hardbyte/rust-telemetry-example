@@ -217,22 +217,44 @@ pub fn init_tracing(
     // Filter the tracing layer - reduce tokio verbosity to avoid span conflicts
     let tracing_level_filter = tracing_subscriber::filter::Targets::new()
         .with_target("bookapp", tracing::Level::TRACE)
+        .with_target("bookapp_dal", tracing::Level::DEBUG) // DAL spans for database operations
+        .with_target("error_injection_dal", tracing::Level::DEBUG) // Error injection DAL spans
         .with_target("backend", tracing::Level::TRACE)
         .with_target("observability_utils", tracing::Level::TRACE)
         .with_target("tokio::task", tracing::Level::TRACE) // Enable tokio task tracing for TaskTrackingLayer
         .with_target("sqlx", tracing::Level::DEBUG)
+        .with_target("sqlx_tracing", tracing::Level::DEBUG)
         .with_target("rdkafka", tracing::Level::INFO)
-        .with_target("tower_http", tracing::Level::INFO)
+        .with_target("tower_otel_http_metrics", tracing::Level::TRACE)
         .with_target("hyper_util", tracing::Level::INFO)
         .with_target("h2", tracing::Level::WARN)
         .with_target("otel::tracing", tracing::Level::INFO)
         .with_default(tracing::Level::INFO);
 
-    // Custom filter for OpenTelemetry layer that excludes runtime.spawn spans
+    // Custom filter for OpenTelemetry layer that excludes tokio runtime spans
     let otel_tracing_filter =
         tracing_level_filter.and(tracing_subscriber::filter::FilterFn::new(|metadata| {
-            // Allow all spans except tokio's runtime.spawn spans (which are handled by TaskTrackingLayer)
-            !(metadata.target() == "tokio::task" && metadata.name() == "runtime.spawn")
+            // Exclude tokio runtime spans from OTLP export to avoid noise in Tempo
+            // These are processed by TaskTrackingLayer for metrics, but we don't want raw spans
+            let target = metadata.target();
+            let name = metadata.name();
+
+            // Filter out tokio task spans by target
+            if target == "tokio::task" || target.starts_with("tokio::task::") {
+                return false;
+            }
+
+            // Filter out runtime.spawn spans by name (tokio creates these for spawned tasks)
+            if name == "runtime.spawn" || name == "task" {
+                return false;
+            }
+
+            // Filter out console-subscriber spans
+            if target.starts_with("console_subscriber") {
+                return false;
+            }
+
+            true
         }));
 
     // Turn our OTLP pipeline into a tracing layer
@@ -247,6 +269,17 @@ pub fn init_tracing(
         .with_thread_ids(false)
         .with_thread_names(false)
         .compact();
+
+    // Filter stdout to reduce OTLP export noise (connection errors, timeouts, etc.)
+    let stdout_filter = tracing_subscriber::EnvFilter::from_default_env()
+        .add_directive("opentelemetry=warn".parse().unwrap())
+        .add_directive("opentelemetry_sdk=warn".parse().unwrap())
+        .add_directive("opentelemetry_otlp=warn".parse().unwrap())
+        .add_directive("tonic=warn".parse().unwrap())
+        .add_directive("hyper=warn".parse().unwrap())
+        .add_directive("hyper_util=warn".parse().unwrap())
+        .add_directive("h2=warn".parse().unwrap())
+        .add_directive("tower=warn".parse().unwrap());
 
     let stdout_layer = tracing_subscriber::fmt::layer().event_format(format);
 
@@ -280,7 +313,7 @@ pub fn init_tracing(
         .with(sentry_layer)
         .with(otel_log_layer)
         .with(opentelemetry_metrics_layer)
-        .with(stdout_layer.with_filter(tracing_subscriber::EnvFilter::from_default_env()));
+        .with(stdout_layer.with_filter(stdout_filter));
 
     // Add automatic task tracking layer if available
     #[cfg(feature = "tracing-layer")]

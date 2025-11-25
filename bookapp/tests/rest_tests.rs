@@ -16,9 +16,13 @@ mod tests {
     };
     use dotenv::dotenv;
     use rdkafka::producer::FutureProducer;
+    use reqwest::Client;
     use serde_json::Value;
     use sqlx::PgPool;
     use std::{collections::HashSet, sync::Arc};
+    use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
+    use tokio::time::Duration;
     use tower::ServiceExt;
     use uuid::Uuid;
 
@@ -26,10 +30,7 @@ mod tests {
     async fn setup_transactional_test_app(pool: PgPool) -> axum::Router {
         dotenv().ok();
         let producer: FutureProducer = book_ingestion::create_producer().unwrap();
-        let db_pools = DatabasePools {
-            write_pool: Arc::new(pool.clone()),
-            read_pool: Arc::new(pool),
-        };
+        let db_pools = DatabasePools::from_pg_pool(pool);
         axum::Router::new()
             .nest_service("/books", bookapp::rest::book_service())
             .layer(Extension(
@@ -74,7 +75,7 @@ mod tests {
 
     #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_get_book_ids(pool: PgPool) {
-        let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let repo = BookRepositoryImpl::from_pg_pool(Arc::new(pool.clone()));
         for idx in 0..2 {
             let input = BookCreateInput {
                 work_title: format!("IDs Title {idx}"),
@@ -110,7 +111,7 @@ mod tests {
 
     #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_get_book_ids_cursor_flow(pool: PgPool) {
-        let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let repo = BookRepositoryImpl::from_pg_pool(Arc::new(pool.clone()));
         for idx in 0..3 {
             let input = BookCreateInput {
                 work_title: format!("IDs Cursor Title {idx}"),
@@ -233,7 +234,7 @@ mod tests {
     #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_get_all_books_respects_pagination(pool: PgPool) {
         // Seed a few books to ensure predictable pagination
-        let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let repo = BookRepositoryImpl::from_pg_pool(Arc::new(pool.clone()));
         for idx in 0..3 {
             let input = BookCreateInput {
                 work_title: format!("Paging Title {idx}"),
@@ -274,7 +275,7 @@ mod tests {
 
     #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_get_all_books_cursor_flow(pool: PgPool) {
-        let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let repo = BookRepositoryImpl::from_pg_pool(Arc::new(pool.clone()));
         for idx in 0..4 {
             let input = BookCreateInput {
                 work_title: format!("Cursor Title {idx}"),
@@ -394,7 +395,7 @@ mod tests {
     #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_get_existing_book(pool: PgPool) {
         // Create a book to ensure it exists
-        let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let repo = BookRepositoryImpl::from_pg_pool(Arc::new(pool.clone()));
         let input = BookCreateInput {
             work_title: "Test Title".to_string(),
             primary_author_id: None,
@@ -443,7 +444,7 @@ mod tests {
     #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_update_existing_book(pool: PgPool) {
         // Create a book to update
-        let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let repo = BookRepositoryImpl::from_pg_pool(Arc::new(pool.clone()));
         let input = BookCreateInput {
             work_title: "Original Title".to_string(),
             primary_author_id: None,
@@ -490,7 +491,7 @@ mod tests {
 
     #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_update_book_invalid_json(pool: PgPool) {
-        let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let repo = BookRepositoryImpl::from_pg_pool(Arc::new(pool.clone()));
         let input = BookCreateInput {
             work_title: "Title".to_string(),
             primary_author_id: None,
@@ -534,7 +535,7 @@ mod tests {
             .expect("valid uuid");
 
         // Verify the book was actually created
-        let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let repo = BookRepositoryImpl::from_pg_pool(Arc::new(pool.clone()));
         let created_book = repo.find_by_id(book_id).await.unwrap().unwrap();
         assert_eq!(created_book.primary_author_name, "New Author");
         assert_eq!(created_book.work_title, "New Title");
@@ -591,7 +592,7 @@ mod tests {
         assert_eq!(book_ids.len(), 2);
 
         // Verify both books were created
-        let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let repo = BookRepositoryImpl::from_pg_pool(Arc::new(pool.clone()));
         for book_id_value in book_ids {
             let book_id = book_id_value
                 .as_str()
@@ -639,7 +640,7 @@ mod tests {
     #[sqlx::test(migrations = "../bookapp-dal/migrations")]
     async fn test_delete_existing_book(pool: PgPool) {
         // Create a book to delete
-        let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let repo = BookRepositoryImpl::from_pg_pool(Arc::new(pool.clone()));
         let input = BookCreateInput {
             work_title: "To Delete Title".to_string(),
             primary_author_id: None,
@@ -685,10 +686,7 @@ mod tests {
     async fn setup_full_test_app(pool: PgPool) -> axum::Router {
         dotenv().ok();
         let producer: FutureProducer = book_ingestion::create_producer().unwrap();
-        let db_pools = DatabasePools {
-            write_pool: Arc::new(pool.clone()),
-            read_pool: Arc::new(pool),
-        };
+        let db_pools = DatabasePools::from_pg_pool(pool);
         bookapp::rest::api_router()
             .layer(Extension(
                 Arc::new(StubBookDetailsProvider) as Arc<dyn BookDetailsProvider>
@@ -762,7 +760,7 @@ mod tests {
             .expect("valid uuid");
 
         // Verify an outbox event exists for this work
-        let events = EventRepositoryImpl::single_pool(Arc::new(pool))
+        let events = EventRepositoryImpl::from_pg_pool(Arc::new(pool))
             .list_for_aggregate("work", &work_id.to_string())
             .await
             .unwrap();
@@ -817,7 +815,7 @@ mod tests {
             .parse()
             .unwrap();
         // Verify via DAL
-        let edition = EditionRepositoryImpl::single_pool(Arc::new(pool))
+        let edition = EditionRepositoryImpl::from_pg_pool(Arc::new(pool))
             .find_by_id(edition_id)
             .await
             .unwrap()
@@ -880,7 +878,7 @@ mod tests {
         assert_eq!(resp_assoc.status(), StatusCode::NO_CONTENT);
 
         // Verify association via DAL
-        let assocs = SeriesRepositoryImpl::single_pool(Arc::new(pool))
+        let assocs = SeriesRepositoryImpl::from_pg_pool(Arc::new(pool))
             .list_works(series_id)
             .await
             .unwrap();
@@ -897,7 +895,7 @@ mod tests {
         let app = setup_full_test_app(pool.clone()).await;
 
         // Create test books with searchable content
-        let repo = BookRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let repo = BookRepositoryImpl::from_pg_pool(Arc::new(pool.clone()));
         let test_books = vec![
             BookCreateInput {
                 work_title: "The Lord of the Rings".to_string(),
@@ -1000,5 +998,87 @@ mod tests {
         let json = get_response_json(response).await;
         let results = json.as_array().unwrap();
         assert!(results.len() <= 1, "Should respect limit parameter");
+    }
+
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
+    async fn test_nplus1_db_endpoint(pool: PgPool) {
+        let repo = BookRepositoryImpl::from_pg_pool(Arc::new(pool.clone()));
+        for idx in 0..4 {
+            repo.create(BookCreateInput {
+                work_title: format!("N+1 DB Title {idx}"),
+                primary_author_id: None,
+                primary_author_name: Some(format!("N+1 DB Author {idx}")),
+                status: Some(BookStatus::Available),
+            })
+            .await
+            .unwrap();
+        }
+
+        let app = setup_transactional_test_app(pool).await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/books/nplus1/db?limit=3")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let books: Vec<Value> = get_response_json(response)
+            .await
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(books.len(), 3);
+    }
+
+    #[sqlx::test(migrations = "../bookapp-dal/migrations")]
+    async fn test_nplus1_api_endpoint(pool: PgPool) {
+        let repo = BookRepositoryImpl::from_pg_pool(Arc::new(pool.clone()));
+        for idx in 0..3 {
+            repo.create(BookCreateInput {
+                work_title: format!("N+1 API Title {idx}"),
+                primary_author_id: None,
+                primary_author_name: Some(format!("N+1 API Author {idx}")),
+                status: Some(BookStatus::Available),
+            })
+            .await
+            .unwrap();
+        }
+
+        let app = setup_transactional_test_app(pool.clone()).await;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let base_url = format!("http://127.0.0.1:{port}");
+
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server = axum::serve(listener, app.clone()).with_graceful_shutdown(async {
+            let _ = shutdown_rx.await;
+        });
+        tokio::spawn(async move {
+            if let Err(err) = server.await {
+                eprintln!("server error: {err}");
+            }
+        });
+
+        let client = Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let response = client
+            .get(format!(
+                "{}/books/nplus1/api?limit=2&base_url={}",
+                base_url, base_url
+            ))
+            .send()
+            .await
+            .unwrap();
+        shutdown_tx.send(()).ok();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let books: Vec<Value> = response.json().await.unwrap();
+        assert_eq!(books.len(), 2);
     }
 }

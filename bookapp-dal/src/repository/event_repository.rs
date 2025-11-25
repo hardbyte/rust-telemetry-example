@@ -1,17 +1,18 @@
 use crate::error::Result;
 use crate::models::{Event, EventCreateInput};
+use crate::TracedPgPool;
 use sqlx::{Executor, PgPool, Postgres};
 use std::sync::Arc;
 use tracing::{instrument, Level};
 
 pub struct EventRepositoryImpl {
-    write_pool: Arc<PgPool>,
-    read_pool: Arc<PgPool>,
+    write_pool: Arc<TracedPgPool>,
+    read_pool: Arc<TracedPgPool>,
 }
 
 impl EventRepositoryImpl {
-    /// Create repository with separate read and write pools
-    pub fn new(write_pool: Arc<PgPool>, read_pool: Arc<PgPool>) -> Self {
+    /// Create repository with separate read and write pools (traced for OTel)
+    pub fn new(write_pool: Arc<TracedPgPool>, read_pool: Arc<TracedPgPool>) -> Self {
         Self {
             write_pool,
             read_pool,
@@ -19,10 +20,25 @@ impl EventRepositoryImpl {
     }
 
     /// Create repository with single pool for both read and write operations
-    pub fn single_pool(pool: Arc<PgPool>) -> Self {
+    pub fn single_pool(pool: Arc<TracedPgPool>) -> Self {
         Self {
             write_pool: pool.clone(),
             read_pool: pool,
+        }
+    }
+
+    /// Create repository from untraced PgPool (for tests and backwards compatibility)
+    pub fn from_pg_pool(pool: Arc<PgPool>) -> Self {
+        use sqlx_tracing::PoolBuilder;
+        let traced = Arc::new(
+            PoolBuilder::from((*pool).clone())
+                .with_name("test-pool")
+                .with_database("bookapp")
+                .build(),
+        );
+        Self {
+            write_pool: traced.clone(),
+            read_pool: traced,
         }
     }
 
@@ -352,7 +368,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_append_and_list(pool: PgPool) {
-        let repo = EventRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let repo = EventRepositoryImpl::from_pg_pool(Arc::new(pool.clone()));
 
         // Append a simple event
         let event_id = repo
@@ -396,7 +412,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_exec_with_transaction(pool: PgPool) {
-        let repo = EventRepositoryImpl::single_pool(Arc::new(pool.clone()));
+        let repo = EventRepositoryImpl::from_pg_pool(Arc::new(pool.clone()));
 
         let mut tx: Transaction<'_, Postgres> = pool.begin().await.expect("begin");
 

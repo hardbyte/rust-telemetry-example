@@ -30,7 +30,7 @@ pub async fn start_outbox_publisher(
     config: OutboxPublisherConfig,
     shutdown: watch::Receiver<bool>,
 ) -> Result<()> {
-    let repo = EventRepositoryImpl::single_pool(pool.clone());
+    let repo = EventRepositoryImpl::from_pg_pool(pool.clone());
 
     info!(
         "Starting outbox publisher with interval {:?}",
@@ -42,18 +42,8 @@ pub async fn start_outbox_publisher(
             break;
         }
 
-        // Create a new root span for each polling cycle
-        let cycle_span = tracing::info_span!(
-            "outbox_publish_cycle",
-            batch_size = %config.batch_size,
-            otel.kind = "internal"
-        );
-
-        let result = cycle_span
-            .in_scope(|| async {
-                publish_unpublished_events(&repo, pool.as_ref(), &producer, &config).await
-            })
-            .await;
+        // Perform the polling without a parent span to avoid noise
+        let result = publish_unpublished_events(&repo, pool.as_ref(), &producer, &config).await;
 
         match result {
             Ok(count) => {
@@ -76,7 +66,6 @@ pub async fn start_outbox_publisher(
     Ok(())
 }
 
-#[instrument(skip_all)]
 async fn publish_unpublished_events(
     repo: &EventRepositoryImpl,
     pool: &PgPool,
@@ -93,39 +82,49 @@ async fn publish_unpublished_events(
         return Ok(0);
     }
 
-    debug!(count = events.len(), "Found unpublished events");
+    debug!(count = events.len(), "Processing unpublished events");
     let mut published_count = 0usize;
 
-    for ev in events {
-        // Determine topic: event.topic overrides default
-        let topic = match (&ev.topic, &config.default_topic) {
-            (Some(t), _) if !t.is_empty() => t.clone(),
-            (None, Some(t)) if !t.is_empty() => t.clone(),
-            _ => {
-                warn!(event_id = ev.id, "No topic configured for event; skipping");
-                // Mark as failed so we don't spin forever; alternatively leave it for manual intervention
-                let _ = repo
-                    .mark_publish_failed_with(pool, ev.id, "no topic configured")
-                    .await;
-                continue;
-            }
-        };
+    // Create a span only when we actually have work to do
+    let span = tracing::info_span!(
+        "outbox_processing",
+        batch_size = %events.len(),
+        otel.kind = "internal"
+    );
 
-        match publish_event(producer, &topic, &ev).await {
-            Ok(()) => {
-                let _ = repo.mark_published_with(pool, ev.id).await;
-                published_count += 1;
-            }
-            Err(e) => {
-                error!(event_id = ev.id, error = %e, "Failed to publish outbox event");
-                let _ = repo
-                    .mark_publish_failed_with(pool, ev.id, &format!("{e:#}"))
-                    .await;
+    async move {
+        for ev in events {
+            // Determine topic: event.topic overrides default
+            let topic = match (&ev.topic, &config.default_topic) {
+                (Some(t), _) if !t.is_empty() => t.clone(),
+                (None, Some(t)) if !t.is_empty() => t.clone(),
+                _ => {
+                    warn!(event_id = ev.id, "No topic configured for event; skipping");
+                    // Mark as failed so we don't spin forever; alternatively leave it for manual intervention
+                    let _ = repo
+                        .mark_publish_failed_with(pool, ev.id, "no topic configured")
+                        .await;
+                    continue;
+                }
+            };
+
+            match publish_event(producer, &topic, &ev).await {
+                Ok(()) => {
+                    let _ = repo.mark_published_with(pool, ev.id).await;
+                    published_count += 1;
+                }
+                Err(e) => {
+                    error!(event_id = ev.id, error = %e, "Failed to publish outbox event");
+                    let _ = repo
+                        .mark_publish_failed_with(pool, ev.id, &format!("{e:#}"))
+                        .await;
+                }
             }
         }
+        Ok(published_count)
     }
-
-    Ok(published_count)
+    .instrument(span)
+    .await
 }
 
 #[instrument(skip_all, fields(topic = %topic, event.id = event.id))]

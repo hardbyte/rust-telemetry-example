@@ -1,76 +1,61 @@
+use std::time::Duration;
+
 use bookapp_dal::Book;
 use reqwest::Client;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware, Extension};
 use reqwest_tracing::TracingMiddleware;
 use tracing::instrument;
+use uuid::Uuid;
 
-#[tracing::instrument(skip(books))]
-pub(crate) async fn fetch_bulk_book_details(books: &[Book]) -> Vec<String> {
+fn traced_client() -> ClientWithMiddleware {
     let reqwest_client = Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(Duration::from_secs(10))
         .build()
-        .unwrap();
+        .expect("reqwest client");
 
-    let http_client = ClientBuilder::new(reqwest_client)
-        // This extension would set the span name to `backend-client`
-        // Instead of the request path e.g. `GET /books/{id}`
-        // .with_init(Extension(reqwest_tracing::OtelName(
-        //     "backend-client".into(),
-        // )))
+    // Propagate OTEL context on outbound HTTP calls for clarity in traces.
+    ClientBuilder::new(reqwest_client)
         .with_init(Extension(
             reqwest_tracing::OtelPathNames::known_paths(["/books/{id}"]).unwrap(),
         ))
-        // Trace HTTP requests. See the tracing crate to make use of these traces.
         .with(TracingMiddleware::default())
-        //.with(TracingMiddleware::<reqwest_tracing::SpanBackendWithUrl>::new())
-        .build();
-
-    // Run each query to backend sequentially (should propagate context):
-    let mut seq_book_details = Vec::new();
-
-    fetch_some_books_sequentially(&http_client, &mut seq_book_details, books).await;
-
-    // Run queries to backend in parallel:
-    fetch_some_books_in_parallel(http_client, books).await;
-
-    seq_book_details
+        .build()
 }
 
-#[instrument(skip_all)]
-async fn fetch_some_books_in_parallel(http_client: ClientWithMiddleware, some_books: &[Book]) {
-    let futures = some_books.iter().take(5).map(|book| {
-        let http_client = http_client.clone();
-        async move {
-            tracing::debug!(id = %book.id, "Getting one book from backend");
-            let r = http_client
-                .get(format!("http://backend:8000/books/{}", book.id))
-                .send()
+#[instrument(skip(book_ids), fields(num_ids = book_ids.len()))]
+pub async fn fetch_books_sequential_via_api(
+    base_url: &str,
+    book_ids: &[Uuid],
+) -> reqwest_middleware::Result<Vec<Book>> {
+    let base = base_url.trim_end_matches('/');
+    let client = traced_client();
+    let mut books = Vec::with_capacity(book_ids.len());
+
+    for id in book_ids {
+        let url = format!("{}/books/{}", base, id);
+        let response = client.get(url).send().await?;
+        if response.status().is_success() {
+            let book = response
+                .json::<Book>()
                 .await
-                .expect("failed to get response from backend");
-
-            r.text().await.unwrap()
+                .map_err(reqwest_middleware::Error::from)?;
+            books.push(book);
         }
-    });
+    }
 
-    let _book_details: Vec<String> = futures::future::join_all(futures).await;
+    Ok(books)
 }
 
-#[instrument(skip_all)]
-async fn fetch_some_books_sequentially(
-    http_client: &ClientWithMiddleware,
-    seq_book_details: &mut Vec<String>,
-    some_books: &[Book],
-) {
-    for book in some_books.iter().take(5) {
-        let r = http_client
-            .get(format!("http://backend:8000/books/{}", book.id))
-            .send()
-            // Can also go here:
-            //.with_extension(reqwest_tracing::OtelPathNames::known_paths(["/books/{id}"])?)
-            .await
-            .expect("failed to get response from backend");
-
-        let book_detail = r.text().await.unwrap();
-        seq_book_details.push(book_detail);
+#[instrument(skip(repo, book_ids), fields(num_ids = book_ids.len()))]
+pub async fn fetch_books_sequential_from_db(
+    repo: &bookapp_dal::BookRepositoryImpl,
+    book_ids: &[Uuid],
+) -> bookapp_dal::Result<Vec<Book>> {
+    let mut books = Vec::with_capacity(book_ids.len());
+    for id in book_ids {
+        if let Some(book) = repo.find_by_id(*id).await? {
+            books.push(book);
+        }
     }
+    Ok(books)
 }

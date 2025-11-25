@@ -12,4 +12,5 @@ sqlx = { version = "0.8.6", features = [
     "chrono",
     "migrate"
 ] }
+sqlx-tracing = { workspace = true, features = ["postgres"] }
 tracing = "0.1.41"

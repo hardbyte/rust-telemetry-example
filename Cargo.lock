@@ -467,6 +467,7 @@ dependencies = [
  "signal-hook",
  "signal-hook-tokio",
  "sqlx",
+ "sqlx-tracing",
  "tokio",
  "tokio-cron-scheduler",
  "tracing",
@@ -569,6 +570,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
+ "sqlx-tracing",
  "tokio",
  "tower 0.5.2",
  "tower-http",
@@ -595,6 +597,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
+ "sqlx-tracing",
  "thiserror 2.0.17",
  "tokio",
  "tokio-test",
@@ -1059,6 +1062,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "sqlx",
+ "sqlx-tracing",
  "tracing",
 ]
 
@@ -3930,6 +3934,16 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "sqlx-tracing"
+version = "0.2.0"
+source = "git+https://github.com/oscartbeaumont/sqlx-tracing?branch=transaction-commit-rollback#2b4d7ef300b787f8efabcc3bf2e0ee1da6110c0b"
+dependencies = [
+ "futures",
+ "sqlx",
+ "tracing",
 ]
 
 [[package]]

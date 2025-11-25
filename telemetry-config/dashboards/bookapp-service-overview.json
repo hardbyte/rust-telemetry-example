@@ -30,7 +30,8 @@
         "y": 0
       },
       "id": 100,
-      "title": "\ud83c\udfaf Service Health & Status",
+      "title": "
+ Service Health & Status",
       "type": "row"
     },
     {
@@ -38,7 +39,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Combined health of API service (HTTP check) and backend service (container stats)",
+      "description": "API Service Availability (HTTP Check)",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -79,7 +80,7 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
+        "w": 4,
         "x": 0,
         "y": 1
       },
@@ -101,7 +102,6 @@
         "textMode": "auto",
         "wideLayout": true
       },
-      "pluginVersion": "12.1.1",
       "targets": [
         {
           "datasource": {
@@ -109,12 +109,174 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "min(httpcheck_status{http_status_class=\"2xx\",http_url=\"http://app:8000/health\"}) * min(container_cpu_usage_nanoseconds_total{container_name=~\".*backend.*\"} > 0 or vector(1))",
+          "expr": "min(httpcheck_status{http_status_class=\"2xx\"}) or vector(0)",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Service Health",
+      "title": "API Health",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Backend Service Status (Container Running)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "index": 1,
+                  "text": "DOWN"
+                },
+                "1": {
+                  "color": "green",
+                  "index": 0,
+                  "text": "UP"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "id": 15,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max(up{job=\"docker_stats\", container_name=~".*backend.*\"}) or vector(0)",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Backend Health",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "OpenTelemetry Collector Health",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "index": 1,
+                  "text": "DOWN"
+                },
+                "1": {
+                  "color": "green",
+                  "index": 0,
+                  "text": "UP"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(up{job=\"opentelemetry-collector\"}) or vector(0)",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Collector Health",
       "type": "stat"
     },
     {
@@ -149,7 +311,7 @@
       "gridPos": {
         "h": 4,
         "w": 6,
-        "x": 6,
+        "x": 12,
         "y": 1
       },
       "id": 2,
@@ -157,8 +319,6 @@
         "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -166,11 +326,9 @@
           "fields": "",
           "values": false
         },
-        "showPercentChange": false,
         "textMode": "auto",
         "wideLayout": true
       },
-      "pluginVersion": "12.1.1",
       "targets": [
         {
           "datasource": {
@@ -191,7 +349,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Number of Kafka topic partitions available",
+      "description": "Number of Kafka topic partitions",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -222,7 +380,7 @@
       "gridPos": {
         "h": 4,
         "w": 6,
-        "x": 12,
+        "x": 18,
         "y": 1
       },
       "id": 3,
@@ -230,8 +388,6 @@
         "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -239,11 +395,9 @@
           "fields": "",
           "values": false
         },
-        "showPercentChange": false,
         "textMode": "auto",
         "wideLayout": true
       },
-      "pluginVersion": "12.1.1",
       "targets": [
         {
           "datasource": {
@@ -256,99 +410,7 @@
           "refId": "A"
         }
       ],
-      "title": "Kafka Topic Partitions",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "description": "OpenTelemetry Collector health status",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [
-            {
-              "options": {
-                "0": {
-                  "color": "green",
-                  "index": 0,
-                  "text": "OK"
-                }
-              },
-              "type": "value"
-            },
-            {
-              "options": {
-                "from": 1,
-                "result": {
-                  "color": "red",
-                  "index": 1,
-                  "text": "ALERTS"
-                },
-                "to": 100
-              },
-              "type": "range"
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 1
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 18,
-        "y": 1
-      },
-      "id": 4,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "12.1.1",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "sum(up{job=\"opentelemetry-collector\"}) or vector(0)",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Collector Health",
+      "title": "Kafka Partitions",
       "type": "stat"
     },
     {
@@ -360,7 +422,8 @@
         "y": 5
       },
       "id": 120,
-      "title": "\ud83d\udc33 Container Resources",
+      "title": "
+ Container Resources",
       "type": "row"
     },
     {
@@ -556,7 +619,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "container_memory_percent_ratio{container_name=~\"$container_name\"} * 100",
+          "expr": "container_memory_percent_ratio{container_name=~\"$container_name\"}",
           "legendFormat": "{{container_name}}",
           "range": true,
           "refId": "A"
@@ -570,7 +633,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Comprehensive resource usage summary for all containers including CPU utilization, memory usage, memory limits, and disk usage",
+      "description": "Comprehensive resource usage summary for all containers",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -581,26 +644,7 @@
             "align": "auto",
             "cellOptions": {
               "type": "auto"
-            },
-            "inspect": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "yellow",
-                "value": 50
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
+            }
           }
         },
         "overrides": [
@@ -649,72 +693,6 @@
                 "value": 100
               }
             ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Memory Used"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "bytes"
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-text"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Memory Limit"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "bytes"
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-text"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Disk Used"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "bytes"
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-text"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Container"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 200
-              }
-            ]
           }
         ]
       },
@@ -743,7 +721,6 @@
           }
         ]
       },
-      "pluginVersion": "11.0.0",
       "targets": [
         {
           "datasource": {
@@ -751,7 +728,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(container_cpu_usage_nanoseconds_total{container_name=~\".*-(app|backend|db|kafka|zookeeper|loki|grafana|tempo|mimir|prometheus|otelcol).*\"}[5m]) / 1000000000",
+          "expr": "rate(container_cpu_usage_nanoseconds_total{container_name=~\"(.*-(app|backend|db|kafka)).*\"}[5m]) / 1000000000",
           "format": "table",
           "instant": true,
           "refId": "CPU"
@@ -762,43 +739,10 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "container_memory_working_set_bytes{container_name=~\".*-(app|backend|db|kafka|zookeeper|loki|grafana|tempo|mimir|prometheus|otelcol).*\"} / container_spec_memory_limit_bytes{container_name=~\".*-(app|backend|db|kafka|zookeeper|loki|grafana|tempo|mimir|prometheus|otelcol).*\"} * 100",
+          "expr": "container_memory_percent_ratio{container_name=~\"(.*-(app|backend|db|kafka)).*\"}",
           "format": "table",
           "instant": true,
           "refId": "MEMORY_PCT"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "container_memory_working_set_bytes{container_name=~\".*-(app|backend|db|kafka|zookeeper|loki|grafana|tempo|mimir|prometheus|otelcol).*\"}",
-          "format": "table",
-          "instant": true,
-          "refId": "MEMORY_BYTES"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "container_spec_memory_limit_bytes{container_name=~\".*-(app|backend|db|kafka|zookeeper|loki|grafana|tempo|mimir|prometheus|otelcol).*\"}",
-          "format": "table",
-          "instant": true,
-          "refId": "MEMORY_LIMIT"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "container_fs_usage_bytes{container_name=~\".*-(app|backend|db|kafka|zookeeper|loki|grafana|tempo|mimir|prometheus|otelcol).*\"}",
-          "format": "table",
-          "instant": true,
-          "refId": "DISK_USAGE"
         }
       ],
       "title": "Container Resource Summary",
@@ -815,63 +759,11 @@
           "options": {
             "excludeByName": {
               "Time": true,
-              "Time 1": true,
-              "Time 2": true,
-              "Time 3": true,
-              "Time 4": true,
-              "Time 5": true,
-              "__name__": true,
-              "__name__ 1": true,
-              "__name__ 2": true,
-              "__name__ 3": true,
-              "__name__ 4": true,
-              "__name__ 5": true,
-              "container_id": true,
-              "container_id 1": true,
-              "container_id 2": true,
-              "container_id 3": true,
-              "container_id 4": true,
-              "container_id 5": true,
-              "image": true,
-              "image 1": true,
-              "image 2": true,
-              "image 3": true,
-              "image 4": true,
-              "image 5": true,
-              "job": true,
-              "job 1": true,
-              "job 2": true,
-              "job 3": true,
-              "job 4": true,
-              "job 5": true,
-              "hostname": true,
-              "hostname 1": true,
-              "hostname 2": true,
-              "hostname 3": true,
-              "hostname 4": true,
-              "hostname 5": true,
-              "instance": true,
-              "instance 1": true,
-              "instance 2": true,
-              "instance 3": true,
-              "instance 4": true,
-              "instance 5": true
-            },
-            "includeByName": {},
-            "indexByName": {
-              "container_name": 0,
-              "Value #CPU": 1,
-              "Value #MEMORY_PCT": 2,
-              "Value #MEMORY_BYTES": 3,
-              "Value #MEMORY_LIMIT": 4,
-              "Value #DISK_USAGE": 5
+              "__name__": true
             },
             "renameByName": {
               "Value #CPU": "CPU %",
-              "Value #MEMORY_BYTES": "Memory Used",
               "Value #MEMORY_PCT": "Memory %",
-              "Value #MEMORY_LIMIT": "Memory Limit",
-              "Value #DISK_USAGE": "Disk Used",
               "container_name": "Container"
             }
           }
@@ -888,7 +780,8 @@
         "y": 20
       },
       "id": 101,
-      "title": "\ud83d\ude80 HTTP Performance Metrics",
+      "title": "
+ HTTP Performance Metrics",
       "type": "row"
     },
     {
@@ -896,86 +789,28 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "HTTP request rate by endpoint and method",
+      "description": "HTTP request rate",
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
           "unit": "reqps"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 6
+        "y": 21
       },
       "id": 5,
       "options": {
         "legend": {
-          "calcs": [],
           "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true,
-          "values": ["current"]
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
+          "placement": "bottom"
         }
       },
-      "pluginVersion": "12.1.1",
       "targets": [
         {
           "datasource": {
@@ -983,7 +818,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(rate(http_server_request_duration_seconds_count[5m])) by (http_request_method, http_route)",
+          "expr": "sum(rate(http_server_request_duration_seconds_count{service=~\"$service\"}[5m])) by (http_request_method, http_route)",
           "legendFormat": "{{http_request_method}} {{http_route}}",
           "range": true,
           "refId": "A"
@@ -997,23 +832,17 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "HTTP error rate by status code class",
+      "description": "HTTP error rate",
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "thresholds"
           },
-          "mappings": [],
           "thresholds": {
-            "mode": "absolute",
             "steps": [
               {
                 "color": "green",
                 "value": 0
-              },
-              {
-                "color": "yellow",
-                "value": 0.01
               },
               {
                 "color": "red",
@@ -1022,34 +851,20 @@
             ]
           },
           "unit": "percentunit"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 6
+        "y": 21
       },
       "id": 6,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
+        "justifyMode": "auto"
       },
-      "pluginVersion": "12.1.1",
       "targets": [
         {
           "datasource": {
@@ -1057,7 +872,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~\"[45].*\"}[5m])) or vector(0)) / sum(rate(http_server_request_duration_seconds_count[5m]))",
+          "expr": "sum(rate(http_server_request_duration_seconds_count{service=~\"$service\", http_response_status_code=~\"5..\"}[5m])) / sum(rate(http_server_request_duration_seconds_count{service=~\"$service\"}[5m]))",
           "range": true,
           "refId": "A"
         }
@@ -1070,85 +885,28 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "HTTP response time percentiles across all endpoints",
+      "description": "Response time percentiles",
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
           "unit": "s"
-        },
-        "overrides": []
+        }
       },
       "gridPos": {
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 14
+        "y": 29
       },
       "id": 7,
       "options": {
         "legend": {
-          "calcs": [],
           "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
+          "placement": "bottom"
         }
       },
-      "pluginVersion": "12.1.1",
       "targets": [
         {
           "datasource": {
@@ -1156,8 +914,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.50, sum(rate(http_server_request_duration_seconds_bucket[5m])) by (le))",
-          "legendFormat": "p50",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_request_duration_seconds_bucket{service=~\"$service\"}[5m])) by (le))",
+          "legendFormat": "p95",
           "range": true,
           "refId": "A"
         },
@@ -1167,24 +925,13 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_request_duration_seconds_bucket[5m])) by (le))",
-          "legendFormat": "p95",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum(rate(http_server_request_duration_seconds_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(http_server_request_duration_seconds_bucket{service=~\"$service\"}[5m])) by (le))",
           "legendFormat": "p99",
           "range": true,
-          "refId": "C"
+          "refId": "B"
         }
       ],
-      "title": "HTTP Response Time Percentiles",
+      "title": "Response Time Percentiles",
       "type": "timeseries"
     },
     {
@@ -1193,10 +940,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 22
+        "y": 37
       },
-      "id": 102,
-      "title": "\ud83d\udd0d Operational Insights",
+      "id": 200,
+      "title": "
+ Tokio Runtime Metrics",
       "type": "row"
     },
     {
@@ -1204,369 +952,26 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Top errors by frequency using span metrics",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "span_name"
-            },
-            "properties": [
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "targetBlank": true,
-                    "title": "View traces in Tempo",
-                    "url": "http://localhost:3000/explore?orgId=1&left=%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22query%22:%22%7Bresource.service.name%3D%5C%22${__data.fields.service}%5C%22%20%26%26%20span%3Aname%3D%5C%22${__data.fields.span_name}%5C%22%7D%22,%22queryType%22:%22traceql%22%7D%5D,%22range%22:%7B%22from%22:%22now-1h%22,%22to%22:%22now%22%7D%7D"
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 23
-      },
-      "id": 8,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": [
-            "sum"
-          ],
-          "show": false
-        },
-        "showHeader": true
-      },
-      "pluginVersion": "12.1.1",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "topk(10, sum(rate(traces_spanmetrics_calls_total{status_code=\"STATUS_CODE_ERROR\"}[5m])) by (span_name, service))",
-          "format": "table",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Top Errors (Span Metrics)",
-      "type": "table"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "description": "Slowest endpoints using span metrics p99 latency",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Value"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "s"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "span_name"
-            },
-            "properties": [
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "targetBlank": true,
-                    "title": "View traces in Tempo",
-                    "url": "http://localhost:3000/explore?orgId=1&left=%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22query%22:%22%7Bresource.service.name%3D%5C%22${__data.fields.service}%5C%22%20%26%26%20span%3Aname%3D%5C%22${__data.fields.span_name}%5C%22%7D%22,%22queryType%22:%22traceql%22%7D%5D,%22range%22:%7B%22from%22:%22now-1h%22,%22to%22:%22now%22%7D%7D"
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 23
-      },
-      "id": 9,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": [
-            "sum"
-          ],
-          "show": false
-        },
-        "showHeader": true
-      },
-      "pluginVersion": "12.1.1",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "topk(10, histogram_quantile(0.99, sum(rate(traces_spanmetrics_latency_bucket[5m])) by (span_name, service, le)))",
-          "format": "table",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Slowest Endpoints (Span Metrics)",
-      "type": "table"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "description": "Slowest database queries using span metrics p99 latency",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Value"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "s"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "span_name"
-            },
-            "properties": [
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "targetBlank": true,
-                    "title": "View traces in Tempo",
-                    "url": "http://localhost:3000/explore?orgId=1&left=%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22query%22:%22%7Bresource.service.name%3D%5C%22${__data.fields.service}%5C%22%20%26%26%20span%3Aname%3D%5C%22${__data.fields.span_name}%5C%22%7D%22,%22queryType%22:%22traceql%22%7D%5D,%22range%22:%7B%22from%22:%22now-1h%22,%22to%22:%22now%22%7D%7D"
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 31
-      },
-      "id": 14,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": [
-            "sum"
-          ],
-          "show": false
-        },
-        "showHeader": true
-      },
-      "pluginVersion": "12.1.1",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "topk(10, avg_over_time(histogram_quantile(0.99, sum(rate(traces_spanmetrics_latency_bucket{span_name=~\".*(_db|_in_db|sql|query|SELECT|INSERT|UPDATE|DELETE).*\"}[5m])) by (span_name, service, le))[30m:5m]))",
-          "format": "table",
-          "range": false,
-          "refId": "A"
-        }
-      ],
-      "title": "Slowest Database Queries (Span Metrics)",
-      "type": "table"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "description": "Search requests focused metrics",
+      "description": "Worker thread utilization",
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green"
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "reqps"
-        },
-        "overrides": []
+          "unit": "percentunit"
+        }
       },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 39
+        "y": 38
       },
-      "id": 10,
+      "id": 201,
       "options": {
         "legend": {
-          "calcs": [],
           "displayMode": "list",
           "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
         }
       },
       "targets": [
@@ -1576,7 +981,150 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(rate(book_search_requests_total[5m])) by (status)",
+          "expr": "sum by (service) (rate(tokio_runtime_worker_busy_time_seconds_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "{{service}} Worker Util",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Worker Utilization",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Active tasks ratio",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "percentunit"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 38
+      },
+      "id": 202,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "avg by (service) (tokio_runtime_tasks_active_ratio{service=~\"$service\"})",
+          "legendFormat": "{{service}} Active Tasks Ratio",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Active Tasks Ratio",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 46
+      },
+      "id": 300,
+      "title": "
+ Business Metrics",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Books Ingested Rate",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "ops"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 47
+      },
+      "id": 301,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(traces_spanmetrics_calls_total{span_name=\"book_ingestion_processing\"}[5m]))",
+          "legendFormat": "Book Ingestion Rate",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Book Ingestion Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Search Request Rate",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "reqps"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 47
+      },
+      "id": 302,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(book_search_requests_total[5m]))",
+          "legendFormat": "Search Rate",
           "range": true,
           "refId": "A"
         }
@@ -1589,183 +1137,28 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Current number of books in database",
+      "description": "Search Latency p95",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
           },
-          "mappings": [],
-          "max": 1000,
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 500
-              },
-              {
-                "color": "red",
-                "value": 800
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
+          "unit": "s"
+        }
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 39
-      },
-      "id": 11,
-      "options": {
-        "minVizHeight": 75,
-        "minVizWidth": 75,
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showThresholdLabels": false,
-        "showThresholdMarkers": true,
-        "sizing": "auto"
-      },
-      "pluginVersion": "12.1.1",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "bt_sql_books_count",
-          "instant": true,
-          "range": false,
-          "refId": "A"
-        }
-      ],
-      "title": "Books Count",
-      "type": "gauge"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
+        "w": 8,
+        "x": 16,
         "y": 47
       },
-      "id": 103,
-      "title": "\ud83d\udcca Business Metrics",
-      "type": "row"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 48
-      },
-      "id": 105,
-      "title": "\ud83d\udcc8 Data Ingestion & Processing",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "description": "Rate of outbox events being processed by the backend service",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ops"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 49
-      },
-      "id": 16,
+      "id": 303,
       "options": {
         "legend": {
-          "calcs": [],
           "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
+          "placement": "bottom"
         }
       },
-      "pluginVersion": "12.1.1",
       "targets": [
         {
           "datasource": {
@@ -1773,111 +1166,13 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(rate(traces_spanmetrics_calls_total{span_name=~\".*event.*\"}[5m])) by (service)",
+          "expr": "histogram_quantile(0.95, sum(rate(book_search_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "Search p95",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Event Processing Rate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "description": "Span events from database operations in the backend service",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ops"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 49
-      },
-      "id": 17,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "12.1.1",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "sum(rate(traces_spanmetrics_calls_total{span_name=~\".*db.*\"}[5m])) by (service)",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Database Operation Events",
+      "title": "Search Latency (p95)",
       "type": "timeseries"
     },
     {
@@ -1886,10 +1181,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 57
+        "y": 55
       },
-      "id": 104,
-      "title": "\ud83d\udd0d Logs & Traces",
+      "id": 400,
+      "title": "
+ Logs & Traces",
       "type": "row"
     },
     {
@@ -1897,85 +1193,29 @@
         "type": "tempo",
         "uid": "tempo"
       },
-      "description": "Recent traces across all service endpoints",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
       "gridPos": {
-        "h": 8,
+        "h": 10,
         "w": 24,
         "x": 0,
-        "y": 58
+        "y": 56
       },
-      "id": 12,
+      "id": 401,
       "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": [
-            "sum"
-          ],
-          "show": false
-        },
-        "showHeader": true
+        "showTime": true
       },
-      "pluginVersion": "10.2.0",
       "targets": [
         {
           "datasource": {
             "type": "tempo",
             "uid": "tempo"
           },
-          "editorMode": "code",
-          "filters": [
-            {
-              "id": "service-name",
-              "isCustomValue": false,
-              "operator": "=",
-              "scope": "resource",
-              "tag": "service.name",
-              "value": [
-                "bookapp"
-              ],
-              "valueType": "string"
-            }
-          ],
-          "hide": false,
           "limit": 20,
           "query": "{resource.service.name=~\"$service\"}",
           "queryType": "traceql",
-          "refId": "A",
-          "tableType": "traces"
+          "refId": "A"
         }
       ],
-      "title": "Recent Service Traces",
+      "title": "Recent Traces",
       "type": "table"
     },
     {
@@ -1983,48 +1223,17 @@
         "type": "loki",
         "uid": "loki"
       },
-      "description": "Recent service logs across all endpoints",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green"
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
       "gridPos": {
-        "h": 8,
-        "w": 12,
+        "h": 10,
+        "w": 24,
         "x": 0,
         "y": 66
       },
-      "id": 13,
+      "id": 402,
       "options": {
-        "dedupStrategy": "none",
-        "enableLogDetails": true,
-        "prettifyLogMessage": false,
-        "showCommonLabels": false,
+        "showTime": true,
         "showLabels": false,
-        "showTime": false,
-        "sortOrder": "Descending",
-        "wrapLogMessage": false
+        "wrapLogMessage": true
       },
       "targets": [
         {
@@ -2032,745 +1241,16 @@
             "type": "loki",
             "uid": "loki"
           },
-          "editorMode": "code",
-          "expr": "{service_name=\"bookapp\"}",
-          "queryType": "",
+          "expr": "{service_name=~\"$service\"}",
           "refId": "A"
         }
       ],
-      "title": "BookApp Logs",
+      "title": "Recent Logs",
       "type": "logs"
-    },
-    {
-      "datasource": {
-        "type": "loki",
-        "uid": "loki"
-      },
-      "description": "Recent backend service logs",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green"
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 66
-      },
-      "id": 14,
-      "options": {
-        "dedupStrategy": "none",
-        "enableLogDetails": true,
-        "prettifyLogMessage": false,
-        "showCommonLabels": false,
-        "showLabels": false,
-        "showTime": false,
-        "sortOrder": "Descending",
-        "wrapLogMessage": false
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "loki"
-          },
-          "editorMode": "code",
-          "expr": "{service_name=\"backend\"}",
-          "queryType": "",
-          "refId": "A"
-        }
-      ],
-      "title": "Backend Logs",
-      "type": "logs"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 74
-      },
-      "id": 106,
-      "title": "\u2699\ufe0f Tokio Runtime Metrics",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "description": "Number of worker threads in the Tokio runtime",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 75
-      },
-      "id": 107,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "tokio_runtime_workers_ratio",
-          "legendFormat": "Workers: {{service_name}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Tokio Worker Threads",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "description": "Number of currently alive tasks in the Tokio runtime",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 75
-      },
-      "id": 108,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "tokio_runtime_tasks_active",
-          "legendFormat": "Active Tasks: {{service_name}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Tokio Active Tasks",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "description": "Rate of task spawning in the Tokio runtime",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 75
-      },
-      "id": 109,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "tokio_runtime_tasks_spawned_total",
-          "legendFormat": "Total Spawned Tasks: {{service_name}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Tokio Task Spawn Rate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "description": "Number of blocking threads and budget forced yields",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 83
-      },
-      "id": 110,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "tokio_runtime_threads_blocking",
-          "legendFormat": "Blocking Threads: {{service_name}}",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "rate(tokio_runtime_worker_parks_total[5m])",
-          "legendFormat": "Worker Parks Rate: {{service_name}}",
-          "range": true,
-          "refId": "B"
-        }
-      ],
-      "title": "Tokio Runtime Health",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 25
-      },
-      "id": 901,
-      "title": "\ud83d\udd0e Search Refresh",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "req/s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 0,
-        "y": 26
-      },
-      "id": 902,
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "sum(rate(search_refresh_executed_total[5m]))",
-          "legendFormat": "executed",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "sum(rate(search_refresh_requests_total[5m]))",
-          "legendFormat": "requests",
-          "range": true,
-          "refId": "B"
-        }
-      ],
-      "title": "Search Refresh Rate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "req/s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 8,
-        "y": 26
-      },
-      "id": 903,
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "stacking": "normal"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "sum by (reason_category)(\n  label_replace(\n    label_replace(\n      label_replace(\n        label_replace(\n          rate(search_refresh_skipped_total[5m]),\n          \"reason_category\", \"rate_limited\", \"reason\", \"rate limited:.*\"\n        ),\n        \"reason_category\", \"no_updates\", \"reason\", \"no pending updates\"\n      ),\n      \"reason_category\", \"in_progress\", \"reason\", \".*in progress.*\"\n    ),\n    \"reason_category\", \"other\", \"reason\", \"^(?!rate_limited|no_updates|in_progress$).*\"\n  )\n)",
-          "legendFormat": "{{reason_category}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Refresh Skips by Reason",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 16,
-        "y": 26
-      },
-      "id": 904,
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "histogram_quantile(0.5, sum by (le)(rate(search_refresh_duration_seconds_bucket[5m])))",
-          "legendFormat": "p50",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "histogram_quantile(0.9, sum by (le)(rate(search_refresh_duration_seconds_bucket[5m])))",
-          "legendFormat": "p90",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum by (le)(rate(search_refresh_duration_seconds_bucket[5m])))",
-          "legendFormat": "p99",
-          "range": true,
-          "refId": "C"
-        }
-      ],
-      "title": "Refresh Duration (p50/p90/p99)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 0,
-        "y": 32
-      },
-      "id": 905,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "sum(search_refresh_pending_updates)",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Search Pending Updates",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 300
-              }
-            ]
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 6,
-        "y": 32
-      },
-      "id": 906,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "time() - sum(search_refresh_last_refresh_timestamp_seconds)",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Last Refresh Age (s)",
-      "type": "stat"
     }
   ],
-  "preload": false,
-  "refresh": "5s",
-  "schemaVersion": 41,
+  "schemaVersion": 38,
+  "style": "dark",
   "tags": [
     "bookapp",
     "service",
@@ -2779,7 +1259,7 @@
   "templating": {
     "list": [
       {
-        "allValue": ".*",
+        "allValue": "All",
         "current": {
           "selected": false,
           "text": "All",
@@ -2789,15 +1269,15 @@
           "type": "prometheus",
           "uid": "prometheus"
         },
-        "definition": "label_values(traces_spanmetrics_calls_total, service)",
+        "definition": "label_values(up, service)",
         "hide": 0,
         "includeAll": true,
         "multi": true,
         "name": "service",
         "options": [],
         "query": {
-          "query": "label_values(traces_spanmetrics_calls_total, service)",
-          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+          "query": "label_values(up, service)",
+          "refId": "StandardVariableQuery"
         },
         "refresh": 1,
         "regex": "",
@@ -2806,7 +1286,7 @@
         "type": "query"
       },
       {
-        "allValue": ".*",
+        "allValue": "All",
         "current": {
           "selected": false,
           "text": "All",
@@ -2824,7 +1304,7 @@
         "options": [],
         "query": {
           "query": "label_values(container_cpu_usage_seconds_total, container_name)",
-          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+          "refId": "StandardVariableQuery"
         },
         "refresh": 1,
         "regex": "rust-telemetry-example-.*",
@@ -2838,9 +1318,8 @@
     "from": "now-30m",
     "to": "now"
   },
-  "timepicker": {},
   "timezone": "",
-  "title": "BookApp Service Overview ",
+  "title": "BookApp Service Overview",
   "uid": "bookapp-service-overview",
-  "version": 2
+  "version": 10
 }

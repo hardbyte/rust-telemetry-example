@@ -19,6 +19,8 @@ opentelemetry = "0.30.0"
 tracing = { version = "0.1.41" }
 tracing-opentelemetry = { version = "0.31.0" }
 uuid = { version = "1.10.0", features = ["serde", "v7"] }
+# Using git version with commit/rollback support (PR #5: https://github.com/jdrouet/sqlx-tracing/pull/5)
+sqlx-tracing = { git = "https://github.com/oscartbeaumont/sqlx-tracing", branch = "transaction-commit-rollback" }
 
 [patch.crates-io]
 regress = { path = "vendor/regress-0.10.4" }
