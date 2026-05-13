@@ -164,9 +164,9 @@ struct TestConfig {
     books_endpoint: String,
     trace_propagation_wait: Duration,
     log_lookback_duration: Duration,
-    prometheus_datasource_id: String,
-    tempo_datasource_id: String,
-    loki_datasource_id: String,
+    prometheus_datasource_uid: String,
+    tempo_datasource_uid: String,
+    loki_datasource_uid: String,
     expected_service_name: String,
     expected_span_name: String,
     prometheus_query: String,
@@ -199,11 +199,14 @@ impl Default for TestConfig {
                     .parse()
                     .unwrap_or(LOG_LOOKBACK_SECS),
             ),
-            prometheus_datasource_id: std::env::var("PROMETHEUS_DATASOURCE_ID")
-                .unwrap_or_else(|_| "1".to_string()),
-            tempo_datasource_id: std::env::var("TEMPO_DATASOURCE_ID")
-                .unwrap_or_else(|_| "2".to_string()),
-            loki_datasource_id: std::env::var("LOKI_DATASOURCE_ID").unwrap_or_else(|_| "3".to_string()),
+            // Grafana 13 (otel-lgtm 0.27+) only supports proxying by UID, not numeric ID.
+            // The UIDs are pinned by the Grafana datasource provisioning in otel-lgtm.
+            prometheus_datasource_uid: std::env::var("PROMETHEUS_DATASOURCE_UID")
+                .unwrap_or_else(|_| "prometheus".to_string()),
+            tempo_datasource_uid: std::env::var("TEMPO_DATASOURCE_UID")
+                .unwrap_or_else(|_| "tempo".to_string()),
+            loki_datasource_uid: std::env::var("LOKI_DATASOURCE_UID")
+                .unwrap_or_else(|_| "loki".to_string()),
             expected_service_name: expected_service_name.clone(),
             expected_span_name: expected_span_name.clone(),
             prometheus_query: std::env::var("PROMETHEUS_QUERY").unwrap_or_else(|_| {
@@ -288,8 +291,8 @@ async fn query_tempo_for_trace(
     let tempo_urls = [
         format!("{}/api/traces/{trace_id}", config.tempo_url),
         format!(
-            "{}/api/datasources/proxy/{}/api/traces/{}",
-            config.telemetry_url, config.tempo_datasource_id, trace_id
+            "{}/api/datasources/proxy/uid/{}/api/traces/{}",
+            config.telemetry_url, config.tempo_datasource_uid, trace_id
         ),
     ];
 
@@ -421,9 +424,9 @@ async fn query_loki_for_logs(
 
     let log_query = format!("{{service_name=\"{}\"}}", config.expected_service_name);
     let loki_query_url = format!(
-        "{}/api/datasources/proxy/{}/loki/api/v1/query_range?query={}&start={}&end={}&direction=forward",
+        "{}/api/datasources/proxy/uid/{}/loki/api/v1/query_range?query={}&start={}&end={}&direction=forward",
         config.telemetry_url,
-        config.loki_datasource_id,
+        config.loki_datasource_uid,
         urlencoding::encode(&log_query),
         start_ns,
         now_ns
@@ -498,9 +501,9 @@ async fn query_prometheus_for_metrics(
     let prom_query = &config.prometheus_query;
 
     let prometheus_query_url = format!(
-        "{}/api/datasources/proxy/{}/api/v1/query?query={}",
+        "{}/api/datasources/proxy/uid/{}/api/v1/query?query={}",
         config.telemetry_url,
-        config.prometheus_datasource_id,
+        config.prometheus_datasource_uid,
         urlencoding::encode(prom_query)
     );
 
@@ -690,8 +693,8 @@ async fn query_tempo_for_trace_with_error_status(
     let tempo_urls = [
         format!("{}/api/traces/{trace_id}", config.tempo_url),
         format!(
-            "{}/api/datasources/proxy/{}/api/traces/{}",
-            config.telemetry_url, config.tempo_datasource_id, trace_id
+            "{}/api/datasources/proxy/uid/{}/api/traces/{}",
+            config.telemetry_url, config.tempo_datasource_uid, trace_id
         ),
     ];
 

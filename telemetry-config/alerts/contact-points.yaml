@@ -1,0 +1,15 @@
+apiVersion: 1
+
+# Stub contact point so the bundled alert rules can be provisioned.
+# Grafana 13 (in otel-lgtm 0.27+) no longer auto-creates `grafana-default-email`,
+# and provisioning rules that reference a missing receiver fails the whole startup.
+# Replace `addresses` if you want actual notifications.
+contactPoints:
+  - orgId: 1
+    name: grafana-default-email
+    receivers:
+      - uid: grafana-default-email
+        type: email
+        settings:
+          addresses: admin@example.com
+          singleEmail: false
