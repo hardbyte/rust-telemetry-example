@@ -42,6 +42,7 @@ impl RemoteBookDetailsProvider {
 }
 
 /// Stub implementation of BookDetailsProvider for testing
+#[allow(dead_code)]
 pub struct StubBookDetailsProvider;
 
 #[async_trait]

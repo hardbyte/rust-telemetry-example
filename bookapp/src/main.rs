@@ -75,9 +75,12 @@ fn router(db_pools: DatabasePools, producer: FutureProducer) -> Router {
         // start OpenTelemetry trace on incoming request
         // as long as not filtered out!
         .layer(OtelAxumLayer::default())
+        // tower-otel-http-metrics 0.16 still uses opentelemetry 0.30; this meter resolves
+        // against the (un-initialised) 0.30 global provider until the crate ships a 0.31
+        // release, so these RED metrics are temporarily a no-op.
         .layer(
             tower_otel_http_metrics::HTTPMetricsLayerBuilder::builder()
-                .with_meter(opentelemetry::global::meter(env!("CARGO_CRATE_NAME")))
+                .with_meter(opentelemetry_0_30::global::meter(env!("CARGO_CRATE_NAME")))
                 .build()
                 .expect("Failed to build otel metrics layer"),
         )

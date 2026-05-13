@@ -15,12 +15,12 @@ reqwest = { workspace = true, features = ["json", "stream"] }
 serde = { version = "1.0.219", features = ["derive", "rc"] }
 serde_json = { version = "1.0.141" }
 opentelemetry = { workspace = true}
-tracing-opentelemetry = { workspace = true, features=["async-trait"] }
-progenitor-client = { version = "0.11" }
+tracing-opentelemetry = { workspace = true }
+progenitor-client = { version = "0.14" }
 
 
 [build-dependencies]
-progenitor = {version = "0.11"}
+progenitor = {version = "0.14"}
 quote = "1.0.40"
 serde_yaml = { version = "0.9.34" }
 syn = { version = "2.0.104" }

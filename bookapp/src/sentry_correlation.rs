@@ -46,7 +46,6 @@
 //! 4. 📊 **Analyze Context** - View complete distributed trace context
 //! 5. 🎯 **Root Cause** - Identify issue with full request flow visibility
 
-use opentelemetry::trace::TraceContextExt;
 use tracing_subscriber::Layer;
 
 /// A tracing subscriber layer that correlates OpenTelemetry trace context with Sentry events.
@@ -123,14 +122,8 @@ impl SentryOtelCorrelationLayer {
                 .extensions()
                 .get::<tracing_opentelemetry::OtelData>()
             {
-                let parent_cx = &otel_data.parent_cx;
-                let span_ref = parent_cx.span();
-                let span_context = span_ref.span_context();
-
-                if span_context.is_valid() {
-                    let trace_id = span_context.trace_id();
-                    let span_id = span_context.span_id();
-
+                if let (Some(trace_id), Some(span_id)) = (otel_data.trace_id(), otel_data.span_id())
+                {
                     // Add OpenTelemetry context to Sentry scope for cross-platform correlation
                     sentry::configure_scope(|scope| {
                         scope.set_tag("otel.trace_id", format!("{trace_id:032x}"));

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::db::Book;
 use reqwest::Client;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware, Extension};

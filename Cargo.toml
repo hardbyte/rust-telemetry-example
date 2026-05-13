@@ -8,9 +8,9 @@ members = [
 ]
 
 [workspace.dependencies]
-axum = { version = "0.8.4" }
+axum = { version = "0.8.9" }
 tower = "0.5.2"
-reqwest = "0.12.22"
-opentelemetry = "0.30.0"
+reqwest = "0.13.3"
+opentelemetry = "0.31.0"
 tracing = { version = "0.1.41" }
-tracing-opentelemetry = { version = "0.31.0" }
+tracing-opentelemetry = { version = "0.32.1" }
