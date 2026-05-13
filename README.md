@@ -260,7 +260,10 @@ Accept: application/json
 
 ```
 
-Open Grafana at localhost:3000 and login with `admin:admin`
+Open Grafana at [localhost:3000](http://localhost:3000) — anonymous auth is enabled in `docker-compose.yaml`, so no login is needed. Two dashboards are pre-provisioned from `telemetry-config/dashboards/`:
+
+- **Custom Dashboard** (`/d/ae04v0u4pbg8wb/custom-dashboard`): bookapp-specific RED metrics — request rate, error %, p50/p95/p99 latency with trace exemplars, slowest internal spans, service-dependency edges, and a live ERROR/WARN log feed from Loki. Use the `Service` template variable at the top to switch between `bookapp` and `backend`.
+- **OpenTelemetry Collector** (`/d/BKf2sowmj/opentelemetry-collector`): receiver/processor/exporter throughput, queue depth, batch size, collector memory. The RPC and Kubernetes rows are pre-collapsed; expand them only if you run otelcol in a multi-collector or k8s topology.
 
 ![img.png](.github/img.png)
 

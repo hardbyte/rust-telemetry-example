@@ -43,7 +43,12 @@ fn router(db_pools: DatabasePools, producer: FutureProducer) -> Router {
         as std::sync::Arc<dyn error_injection_middleware::ErrorInjectionConfigStore>;
 
     Router::new()
-        .nest_service("/books", rest::book_service())
+        // Use `nest` rather than `nest_service` so the outer router can see the inner
+        // route patterns. axum-tracing-opentelemetry derives the server span name from
+        // the `MatchedPath` extension; with `nest_service` the inner router is opaque,
+        // so `/books/{id}` requests would collapse to a bare `GET` span. With `nest`,
+        // they correctly resolve to `GET /books/{id}`.
+        .nest("/books", rest::book_service())
         .layer(Extension(
             Arc::new(RemoteBookDetailsProvider) as Arc<dyn BookDetailsProvider>
         ))
@@ -54,7 +59,7 @@ fn router(db_pools: DatabasePools, producer: FutureProducer) -> Router {
             error_injection_store.clone(),
             error_injection_middleware::error_injection_middleware,
         ))
-        .nest_service(
+        .nest(
             "/error-injection",
             error_injection_middleware::error_injection_service(error_injection_store.clone()),
         )
