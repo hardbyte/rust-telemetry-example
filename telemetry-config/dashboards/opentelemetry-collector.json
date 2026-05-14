@@ -21,7 +21,7 @@
       }
     ]
   },
-  "description": "Visualize OpenTelemetry (OTEL) collector metrics",
+  "description": "OpenTelemetry Collector internals (receiver/processor/exporter throughput, queue depth, memory, signal flows). Originally contributed by the Grafana community user `monitoringartist`. The 'RPC server/client' and 'Kubernetes' rows are pre-collapsed because the metrics behind them only emit in multi-collector or Kubernetes deployments \u2014 leave them collapsed unless you run otelcol in that topology.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "gnetId": 15983,
@@ -1104,7 +1104,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-9
+          "le": 1e-09
         },
         "legend": {
           "show": true
@@ -4393,7 +4393,7 @@
               "color": "rgba(255,0,255,0.7)"
             },
             "filterValues": {
-              "le": 1e-9
+              "le": 1e-09
             },
             "legend": {
               "show": true
@@ -4481,7 +4481,7 @@
               "color": "rgba(255,0,255,0.7)"
             },
             "filterValues": {
-              "le": 1e-9
+              "le": 1e-09
             },
             "legend": {
               "show": true
@@ -5056,7 +5056,8 @@
   "schemaVersion": 39,
   "tags": [
     "opentelemetry",
-    "monitoringartist"
+    "collector",
+    "telemetry-example"
   ],
   "templating": {
     "list": [
@@ -5354,7 +5355,7 @@
     ]
   },
   "time": {
-    "from": "now-24h",
+    "from": "now-1h",
     "to": "now"
   },
   "timepicker": {

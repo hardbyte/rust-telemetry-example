@@ -43,7 +43,12 @@ fn router(db_pools: DatabasePools, producer: FutureProducer) -> Router {
         as std::sync::Arc<dyn error_injection_middleware::ErrorInjectionConfigStore>;
 
     Router::new()
-        .nest_service("/books", rest::book_service())
+        // Use `nest` rather than `nest_service` so the outer router can see the inner
+        // route patterns. axum-tracing-opentelemetry derives the server span name from
+        // the `MatchedPath` extension; with `nest_service` the inner router is opaque,
+        // so `/books/{id}` requests would collapse to a bare `GET` span. With `nest`,
+        // they correctly resolve to `GET /books/{id}`.
+        .nest("/books", rest::book_service())
         .layer(Extension(
             Arc::new(RemoteBookDetailsProvider) as Arc<dyn BookDetailsProvider>
         ))
@@ -54,7 +59,7 @@ fn router(db_pools: DatabasePools, producer: FutureProducer) -> Router {
             error_injection_store.clone(),
             error_injection_middleware::error_injection_middleware,
         ))
-        .nest_service(
+        .nest(
             "/error-injection",
             error_injection_middleware::error_injection_service(error_injection_store.clone()),
         )
@@ -75,9 +80,12 @@ fn router(db_pools: DatabasePools, producer: FutureProducer) -> Router {
         // start OpenTelemetry trace on incoming request
         // as long as not filtered out!
         .layer(OtelAxumLayer::default())
+        // tower-otel-http-metrics 0.16 still uses opentelemetry 0.30; this meter resolves
+        // against the (un-initialised) 0.30 global provider until the crate ships a 0.31
+        // release, so these RED metrics are temporarily a no-op.
         .layer(
             tower_otel_http_metrics::HTTPMetricsLayerBuilder::builder()
-                .with_meter(opentelemetry::global::meter(env!("CARGO_CRATE_NAME")))
+                .with_meter(opentelemetry_0_30::global::meter(env!("CARGO_CRATE_NAME")))
                 .build()
                 .expect("Failed to build otel metrics layer"),
         )

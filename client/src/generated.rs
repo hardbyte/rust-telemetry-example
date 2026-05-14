@@ -71,11 +71,6 @@ pub mod types {
         #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
         pub title: ::std::option::Option<::std::string::String>,
     }
-    impl ::std::convert::From<&Book> for Book {
-        fn from(value: &Book) -> Self {
-            value.clone()
-        }
-    }
     impl ::std::default::Default for Book {
         fn default() -> Self {
             Self {
@@ -120,11 +115,6 @@ pub mod types {
         pub author: ::std::option::Option<::std::string::String>,
         #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
         pub title: ::std::option::Option<::std::string::String>,
-    }
-    impl ::std::convert::From<&BookCreateIn> for BookCreateIn {
-        fn from(value: &BookCreateIn) -> Self {
-            value.clone()
-        }
     }
     impl ::std::default::Default for BookCreateIn {
         fn default() -> Self {
@@ -295,7 +285,7 @@ impl Client {
     pub fn new(baseurl: &str, inner: crate::ClientState) -> Self {
         #[cfg(not(target_arch = "wasm32"))]
         let client = {
-            let dur = std::time::Duration::from_secs(15);
+            let dur = ::std::time::Duration::from_secs(15u64);
             reqwest::ClientBuilder::new()
                 .connect_timeout(dur)
                 .timeout(dur)
@@ -347,7 +337,7 @@ impl Client {
         .send()
         .await;
     ```*/
-    pub fn get_all_books(&self) -> builder::GetAllBooks {
+    pub fn get_all_books(&self) -> builder::GetAllBooks<'_> {
         builder::GetAllBooks::new(self)
     }
     /**Create a new book
@@ -362,7 +352,7 @@ impl Client {
         .send()
         .await;
     ```*/
-    pub fn create_book(&self) -> builder::CreateBook {
+    pub fn create_book(&self) -> builder::CreateBook<'_> {
         builder::CreateBook::new(self)
     }
     /**Get a book by ID
@@ -377,7 +367,7 @@ impl Client {
         .send()
         .await;
     ```*/
-    pub fn get_book(&self) -> builder::GetBook {
+    pub fn get_book(&self) -> builder::GetBook<'_> {
         builder::GetBook::new(self)
     }
     /**Delete a book by ID
@@ -392,7 +382,7 @@ impl Client {
         .send()
         .await;
     ```*/
-    pub fn delete_book(&self) -> builder::DeleteBook {
+    pub fn delete_book(&self) -> builder::DeleteBook<'_> {
         builder::DeleteBook::new(self)
     }
     /**Update a book by ID
@@ -409,7 +399,7 @@ impl Client {
         .send()
         .await;
     ```*/
-    pub fn update_book(&self) -> builder::UpdateBook {
+    pub fn update_book(&self) -> builder::UpdateBook<'_> {
         builder::UpdateBook::new(self)
     }
 }
