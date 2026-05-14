@@ -49,7 +49,7 @@ services:
 
   db:
     profiles: [ci, default]
-    image: postgres:17
+    image: postgres:18
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
