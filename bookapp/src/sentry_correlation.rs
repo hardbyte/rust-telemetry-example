@@ -245,6 +245,33 @@ mod tests {
     }
 
     #[test]
+    fn non_qualifying_event_preserves_existing_correlation_tags() {
+        let subscriber = tracing_subscriber::registry().with(SentryOtelCorrelationLayer::new());
+        let events = sentry::test::with_captured_events(|| {
+            sentry::configure_scope(|scope| {
+                scope.set_tag("otel.trace_id", "existing-trace");
+                scope.set_tag("otel.span_id", "existing-span");
+            });
+
+            tracing::subscriber::with_default(subscriber, || {
+                tracing::info!("event below the correlation threshold");
+            });
+            sentry::capture_message("captured after info", sentry::Level::Info);
+        });
+
+        let event = events.first().expect("one captured Sentry event");
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            event.tags.get("otel.trace_id").map(String::as_str),
+            Some("existing-trace")
+        );
+        assert_eq!(
+            event.tags.get("otel.span_id").map(String::as_str),
+            Some("existing-span")
+        );
+    }
+
+    #[test]
     fn error_event_uses_the_current_child_span_context() {
         let provider = SdkTracerProvider::builder().build();
         let subscriber = tracing_subscriber::registry()
