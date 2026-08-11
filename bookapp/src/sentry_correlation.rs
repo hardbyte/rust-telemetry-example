@@ -120,23 +120,22 @@ impl SentryOtelCorrelationLayer {
     ) where
         S: tracing::Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
     {
-        // Try to get OpenTelemetry context from the event's span
-        if let Some(span_ref) = ctx.event_span(event) {
-            // Get OpenTelemetry extensions from the span
-            if let Some(otel_data) = span_ref
-                .extensions()
-                .get::<tracing_opentelemetry::OtelData>()
-            {
-                if let (Some(trace_id), Some(span_id)) = (otel_data.trace_id(), otel_data.span_id())
-                {
-                    // Add OpenTelemetry context to Sentry scope for cross-platform correlation
-                    sentry::configure_scope(|scope| {
-                        scope.set_tag("otel.trace_id", format!("{trace_id:032x}"));
-                        scope.set_tag("otel.span_id", format!("{span_id:016x}"));
-                    });
-                }
+        let otel_ids = ctx.event_span(event).and_then(|span_ref| {
+            let extensions = span_ref.extensions();
+            let otel_data = extensions.get::<tracing_opentelemetry::OtelData>()?;
+            Some((otel_data.trace_id()?, otel_data.span_id()?))
+        });
+
+        sentry::configure_scope(|scope| match otel_ids {
+            Some((trace_id, span_id)) => {
+                scope.set_tag("otel.trace_id", format!("{trace_id:032x}"));
+                scope.set_tag("otel.span_id", format!("{span_id:016x}"));
             }
-        }
+            None => {
+                scope.remove_tag("otel.trace_id");
+                scope.remove_tag("otel.span_id");
+            }
+        });
     }
 }
 
@@ -162,7 +161,7 @@ where
     /// - Graceful degradation: Missing OTel context doesn't cause errors
     /// - Minimal allocations: Only formats trace IDs when correlation succeeds
     fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        // Only process events at or above the configured level
+        // Only process events at or more severe than the configured level.
         if self.should_correlate(event.metadata().level()) {
             self.correlate_with_sentry(&ctx, event);
         }
@@ -202,18 +201,41 @@ mod tests {
     }
 
     #[test]
-    fn event_without_an_active_span_does_not_add_correlation_tags() {
+    fn event_without_an_active_span_clears_existing_correlation_tags() {
         let subscriber = tracing_subscriber::registry().with(SentryOtelCorrelationLayer::new());
         let events = sentry::test::with_captured_events(|| {
             sentry::configure_scope(|scope| {
-                scope.remove_tag("otel.trace_id");
-                scope.remove_tag("otel.span_id");
+                scope.set_tag("otel.trace_id", "stale-trace");
+                scope.set_tag("otel.span_id", "stale-span");
             });
 
             tracing::subscriber::with_default(subscriber, || {
                 tracing::warn!("event without an active span");
             });
             sentry::capture_message("captured without span context", sentry::Level::Warning);
+        });
+
+        let event = events.first().expect("one captured Sentry event");
+        assert_eq!(events.len(), 1);
+        assert!(!event.tags.contains_key("otel.trace_id"));
+        assert!(!event.tags.contains_key("otel.span_id"));
+    }
+
+    #[test]
+    fn event_without_otel_data_clears_existing_correlation_tags() {
+        let subscriber = tracing_subscriber::registry().with(SentryOtelCorrelationLayer::new());
+        let events = sentry::test::with_captured_events(|| {
+            sentry::configure_scope(|scope| {
+                scope.set_tag("otel.trace_id", "stale-trace");
+                scope.set_tag("otel.span_id", "stale-span");
+            });
+
+            tracing::subscriber::with_default(subscriber, || {
+                let span = tracing::info_span!("span-without-otel-data");
+                let _guard = span.enter();
+                tracing::error!("event without OTel data");
+            });
+            sentry::capture_message("captured after cleanup", sentry::Level::Error);
         });
 
         let event = events.first().expect("one captured Sentry event");
