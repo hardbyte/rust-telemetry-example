@@ -58,3 +58,6 @@ rand = "0.9.1"
 matchit = "^0.8"
 console-subscriber = "0.4.1"
 async-trait = "0.1.87"
+
+[dev-dependencies]
+sentry = { version = "0.41", features = ["test"] }
