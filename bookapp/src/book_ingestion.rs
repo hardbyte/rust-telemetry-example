@@ -121,7 +121,7 @@ pub async fn send_book_ingestion_message(
     });
 
     // Create Kafka record with headers
-    let key = format!("key-{}", &book_message.book_id.to_string());
+    let key = format!("key-{}", book_message.book_id);
     let record = FutureRecord::to("book_ingestion")
         .key(&key)
         .payload(&payload)

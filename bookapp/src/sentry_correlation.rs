@@ -10,7 +10,7 @@
 //! events in Sentry with the corresponding distributed traces in OpenTelemetry-compatible
 //! systems (like Grafana/Tempo). This layer bridges that gap by:
 //!
-//! 1. Intercepting ERROR-level tracing events
+//! 1. Intercepting WARN and ERROR-level tracing events
 //! 2. Extracting OpenTelemetry trace context from the current span
 //! 3. Adding `otel.trace_id` and `otel.span_id` tags to the Sentry scope
 //!
@@ -57,7 +57,7 @@ use tracing_subscriber::Layer;
 ///
 /// The layer implements the `tracing_subscriber::Layer` trait and processes events by:
 ///
-/// 1. Filtering for WARNING and ERROR-level events (configurable)
+/// 1. Filtering for WARNING and ERROR-level events
 /// 2. Extracting OpenTelemetry context from the event's span
 /// 3. Adding correlation tags to the Sentry scope
 ///
@@ -91,7 +91,6 @@ impl SentryOtelCorrelationLayer {
     /// Creates a new correlation layer with default settings.
     ///
     /// By default, WARNING and ERROR-level events trigger correlation.
-    /// Use `with_level()` to customize this behavior.
     pub fn new() -> Self {
         Self {
             min_level: tracing::Level::WARN,
@@ -200,6 +199,27 @@ mod tests {
         assert!(!layer.should_correlate(&Level::INFO));
         assert!(!layer.should_correlate(&Level::DEBUG));
         assert!(!layer.should_correlate(&Level::TRACE));
+    }
+
+    #[test]
+    fn event_without_an_active_span_does_not_add_correlation_tags() {
+        let subscriber = tracing_subscriber::registry().with(SentryOtelCorrelationLayer::new());
+        let events = sentry::test::with_captured_events(|| {
+            sentry::configure_scope(|scope| {
+                scope.remove_tag("otel.trace_id");
+                scope.remove_tag("otel.span_id");
+            });
+
+            tracing::subscriber::with_default(subscriber, || {
+                tracing::warn!("event without an active span");
+            });
+            sentry::capture_message("captured without span context", sentry::Level::Warning);
+        });
+
+        let event = events.first().expect("one captured Sentry event");
+        assert_eq!(events.len(), 1);
+        assert!(!event.tags.contains_key("otel.trace_id"));
+        assert!(!event.tags.contains_key("otel.span_id"));
     }
 
     #[test]
