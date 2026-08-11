@@ -284,11 +284,6 @@ mod tests {
 
                 expected_trace_id = Some(child_span_context.trace_id().to_string());
                 expected_span_id = Some(child_span_context.span_id().to_string());
-
-                sentry::configure_scope(|scope| {
-                    scope.remove_tag("otel.trace_id");
-                    scope.remove_tag("otel.span_id");
-                });
             });
         });
 
