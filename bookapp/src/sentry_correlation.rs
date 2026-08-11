@@ -203,7 +203,7 @@ mod tests {
     }
 
     #[test]
-    fn nested_span_has_the_same_trace_but_a_different_span_id() {
+    fn error_event_uses_the_current_child_span_context() {
         let provider = SdkTracerProvider::builder().build();
         let subscriber = tracing_subscriber::registry()
             .with(tracing_opentelemetry::layer().with_tracer(provider.tracer("correlation-test")))
@@ -237,8 +237,8 @@ mod tests {
                     "each span has its own span ID"
                 );
 
-                tracing::warn!("capture current child context");
-                sentry::capture_message("captured after warning", sentry::Level::Warning);
+                tracing::error!("capture current child context");
+                sentry::capture_message("captured after error", sentry::Level::Error);
 
                 expected_trace_id = Some(child_span_context.trace_id().to_string());
                 expected_span_id = Some(child_span_context.span_id().to_string());
