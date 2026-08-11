@@ -373,7 +373,7 @@ async fn query_tempo_for_trace(
                                         println!("Failed to parse Tempo JSON response: {e:?}");
                                         println!(
                                             "Response text (first 500 chars): {}",
-                                            &response_text.chars().take(500).collect::<String>()
+                                            response_text.chars().take(500).collect::<String>()
                                         );
                                     }
                                 }
