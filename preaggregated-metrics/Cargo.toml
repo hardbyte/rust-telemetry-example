@@ -1,0 +1,15 @@
+[package]
+name = "preaggregated-metrics"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+opentelemetry-proto = { version = "0.32", default-features = false, features = ["gen-tonic", "metrics"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time"] }
+tonic = { version = "0.14", features = ["transport", "tls-native-roots"] }
+
+[dev-dependencies]
+tokio-stream = { version = "0.1", features = ["net"] }

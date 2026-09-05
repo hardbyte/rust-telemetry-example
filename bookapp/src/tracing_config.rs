@@ -5,7 +5,6 @@ use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
-use std::sync::Arc;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Layer;
 
@@ -21,7 +20,7 @@ fn init_meter_provider() -> Result<SdkMeterProvider, opentelemetry_otlp::Exporte
             opentelemetry_sdk::Resource::builder()
                 .with_attributes(vec![opentelemetry::KeyValue::new(
                     "service.name",
-                    "bookapp",
+                    std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "bookapp".into()),
                 )])
                 .build(),
         )
@@ -65,36 +64,22 @@ pub fn init_tracing() -> (
     } else {
         sentry::init((
             sentry_dsn,
-            sentry::ClientOptions {
-                release: Some(release.into()),
-                environment: Some(environment.into()),
-                traces_sample_rate: 0.1, // Sample 10% of transactions for performance monitoring
-                debug: false,            // Disable debug mode for production
-                enable_logs: true,       // Enable structured log capture
-                before_send: Some(Arc::new(move |mut event| {
-                    // Filter out health check and metrics endpoints
+            sentry::ClientOptions::new()
+                .release(release)
+                .environment(environment)
+                .traces_sample_rate(0.1)
+                .before_send(|mut event| {
                     if let Some(request) = &event.request {
                         if let Some(url) = &request.url {
-                            let url_str = url.as_str();
-                            if url_str.contains("/health") || url_str.contains("/metrics") {
+                            if url.path() == "/health" || url.path() == "/metrics" {
                                 return None;
                             }
                         }
                     }
-
-                    // Add service context
-                    event
-                        .tags
-                        .insert("service".to_string(), "bookapp".to_string());
-
-                    // Remove sensitive server information
                     event.server_name = None;
-
                     Some(event)
-                })),
-                send_default_pii: false, // Disable PII by default for security
-                ..Default::default()
-            },
+                })
+                .send_default_pii(false),
         ))
     };
 
@@ -120,7 +105,7 @@ pub fn init_tracing() -> (
             opentelemetry_sdk::Resource::builder()
                 .with_attributes(vec![opentelemetry::KeyValue::new(
                     "service.name",
-                    "bookapp",
+                    std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "bookapp".into()),
                 )])
                 .build(),
         )
@@ -163,8 +148,6 @@ pub fn init_tracing() -> (
     let stdout_layer = tracing_subscriber::fmt::layer().event_format(format);
 
     // Layer that directly sends log events to OTEL
-    // Note this won't have trace context because that's only known about by the tracing system
-    // not the opentelemetry system. https://github.com/open-telemetry/opentelemetry-rust/issues/1378
     let log_provider = init_logger_provider().unwrap();
     // Add a tracing filter to filter events from crates used by opentelemetry-otlp.
     // The filter levels are set as follows:

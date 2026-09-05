@@ -10,7 +10,7 @@ services:
       TRACE_SAMPLE_PROBABILITY: 1.0
       KAFKA_BROKER_URL: "kafka:9092"
       ENABLE_KAFKA_PRODUCER: "true"
-      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_ENVIRONMENT: "development"
       SENTRY_RELEASE: "bookapp@1.0.0"
     ports:
@@ -33,7 +33,7 @@ services:
       KAFKA_BROKER_URL: "kafka:9092"
       ENABLE_KAFKA_CONSUMER: "true"
       ENABLE_KAFKA_PRODUCER: "true"
-      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_ENVIRONMENT: "development"
       SENTRY_RELEASE: "backend@1.0.0"
     ports:
@@ -55,7 +55,7 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: bookapp
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
@@ -67,7 +67,7 @@ services:
     # Bitnami no longer publishes `bitnami/kafka:latest` to Docker Hub for free use;
     # use the official Apache Kafka image instead. Env vars use the standard
     # `KAFKA_<property>` form (not the Bitnami `KAFKA_CFG_` prefix).
-    image: apache/kafka:3.9.2
+    image: apache/kafka:4.3.1
     environment:
       # KRaft mode configuration (no ZooKeeper needed)
       KAFKA_NODE_ID: 0
@@ -90,7 +90,7 @@ services:
 
   telemetry:
     profiles: [default, ci]
-    image: grafana/otel-lgtm:0.27.1
+    image: grafana/otel-lgtm:0.32.1
     depends_on:
       db:
         condition: service_healthy
@@ -138,10 +138,21 @@ services:
       echo 'Integration tester: Waiting for services to be fully up...' &&
       sleep 15 &&
       echo 'Integration tester: Starting tests...' &&
-      cargo test --test telemetry_test -- --nocapture
+      cargo test -p integration-tests --tests -- --nocapture
       "
     depends_on:
       app:
         condition: service_started
+      telemetry:
+        condition: service_healthy
+
+  histogram-demo:
+    profiles: [default, ci]
+    build:
+      context: .
+      target: histogram-demo
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://telemetry:4317
+    depends_on:
       telemetry:
         condition: service_healthy

@@ -46,6 +46,8 @@
 //! 4. 📊 **Analyze Context** - View complete distributed trace context
 //! 5. 🎯 **Root Cause** - Identify issue with full request flow visibility
 
+use opentelemetry::trace::TraceContextExt;
+use std::sync::OnceLock;
 use tracing_subscriber::Layer;
 
 /// A tracing subscriber layer that correlates OpenTelemetry trace context with Sentry events.
@@ -82,6 +84,7 @@ use tracing_subscriber::Layer;
 /// // Sentry event will automatically include otel.trace_id and otel.span_id tags
 /// ```
 pub struct SentryOtelCorrelationLayer {
+    dispatch: OnceLock<tracing::dispatcher::WeakDispatch>,
     /// The minimum tracing level that triggers correlation.
     /// Defaults to WARN, which includes WARN and ERROR events.
     min_level: tracing::Level,
@@ -94,6 +97,7 @@ impl SentryOtelCorrelationLayer {
     pub fn new() -> Self {
         Self {
             min_level: tracing::Level::WARN,
+            dispatch: OnceLock::new(),
         }
     }
 
@@ -121,9 +125,13 @@ impl SentryOtelCorrelationLayer {
         S: tracing::Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
     {
         let otel_ids = ctx.event_span(event).and_then(|span_ref| {
-            let extensions = span_ref.extensions();
-            let otel_data = extensions.get::<tracing_opentelemetry::OtelData>()?;
-            Some((otel_data.trace_id()?, otel_data.span_id()?))
+            let dispatch = self.dispatch.get()?.upgrade()?;
+            let context = tracing_opentelemetry::get_otel_context(&span_ref.id(), &dispatch)?;
+            let span = context.span();
+            let context = span.span_context();
+            context
+                .is_valid()
+                .then(|| (context.trace_id(), context.span_id()))
         });
 
         sentry::configure_scope(|scope| match otel_ids {
@@ -149,6 +157,10 @@ impl<S> Layer<S> for SentryOtelCorrelationLayer
 where
     S: tracing::Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
 {
+    fn on_register_dispatch(&self, dispatch: &tracing::Dispatch) {
+        let _ = self.dispatch.set(dispatch.downgrade());
+    }
+
     /// Processes tracing events and adds OpenTelemetry correlation to Sentry.
     ///
     /// This method is called for every tracing event. It filters events based on

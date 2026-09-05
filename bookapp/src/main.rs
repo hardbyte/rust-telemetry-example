@@ -3,6 +3,7 @@ mod book_ingestion;
 mod database;
 mod db;
 mod error_injection_middleware;
+mod http_metrics;
 mod reqwest_traced_client;
 mod rest;
 #[cfg(test)]
@@ -80,15 +81,16 @@ fn router(db_pools: DatabasePools, producer: FutureProducer) -> Router {
         // start OpenTelemetry trace on incoming request
         // as long as not filtered out!
         .layer(OtelAxumLayer::default())
-        // tower-otel-http-metrics 0.16 still uses opentelemetry 0.30; this meter resolves
-        // against the (un-initialised) 0.30 global provider until the crate ships a 0.31
-        // release, so these RED metrics are temporarily a no-op.
-        .layer(
-            tower_otel_http_metrics::HTTPMetricsLayerBuilder::builder()
-                .with_meter(opentelemetry_0_30::global::meter(env!("CARGO_CRATE_NAME")))
-                .build()
-                .expect("Failed to build otel metrics layer"),
-        )
+        .layer(axum::middleware::from_fn_with_state(
+            opentelemetry::global::meter("bookapp.http")
+                .f64_histogram("http.server.request.duration")
+                .with_unit("s")
+                .with_boundaries(vec![
+                    0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+                ])
+                .build(),
+            http_metrics::record_duration,
+        ))
         // Other non-traced routes can go after this:
         .route("/health", axum::routing::get(health)) // request processed without span / trace
 }
