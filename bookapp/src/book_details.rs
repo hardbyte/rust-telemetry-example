@@ -34,10 +34,15 @@ impl RemoteBookDetailsProvider {
     async fn get_book_details(
         &self,
         book_id: i32,
-    ) -> Result<client::ResponseValue<client::types::Book>, client::Error> {
+    ) -> Result<client::ResponseValue<client::types::Book>, Box<client::Error>> {
         // Fetch a single book detail using the progenitor generated client
         let progenitor_client = Client::new("http://backend:8000", client::ClientState::default());
-        progenitor_client.get_book().id(book_id).send().await
+        progenitor_client
+            .get_book()
+            .id(book_id)
+            .send()
+            .await
+            .map_err(Box::new)
     }
 }
 

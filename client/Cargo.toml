@@ -12,8 +12,8 @@ doctest = false
 [dependencies]
 tracing = { workspace = true }
 reqwest = { workspace = true, features = ["json", "stream"] }
-serde = { version = "1.0.219", features = ["derive", "rc"] }
-serde_json = { version = "1.0.141" }
+serde = { version = "1.0.229", features = ["derive", "rc"] }
+serde_json = { version = "1.0.151" }
 opentelemetry = { workspace = true}
 tracing-opentelemetry = { workspace = true }
 progenitor-client = { version = "0.14" }
@@ -21,7 +21,7 @@ progenitor-client = { version = "0.14" }
 
 [build-dependencies]
 progenitor = {version = "0.14"}
-quote = "1.0.40"
+quote = "1.0.47"
 serde_yaml = { version = "0.9.34" }
-syn = { version = "2.0.104" }
-prettyplease = { version = "0.2.35" }
+syn = { version = "3.0.5" }
+prettyplease = { version = "0.3.0" }

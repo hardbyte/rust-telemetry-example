@@ -4,7 +4,7 @@ use axum::routing::{get, put};
 use axum::{extract::Request, middleware::Next, response::IntoResponse, Extension, Json, Router};
 use hyper::StatusCode;
 use matchit::Router as MatchRouter;
-use rand::Rng;
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgPool};
 use std::sync::Arc;

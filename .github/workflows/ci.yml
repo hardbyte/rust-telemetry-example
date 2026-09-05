@@ -17,7 +17,7 @@ jobs:
       DATABASE_URL: postgres://postgres:password@localhost:5432/bookapp
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Set up Rust
       uses: dtolnay/rust-toolchain@stable
@@ -25,7 +25,7 @@ jobs:
         components: rustfmt, clippy
 
     - name: Cache cargo registry
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/registry
@@ -41,6 +41,9 @@ jobs:
 
     - name: Build workspace
       run: SQLX_OFFLINE=true cargo build --workspace
+
+    - name: Test preaggregated OTLP export
+      run: cargo test -p preaggregated-metrics
 
     # Start services for both unit tests (with external access) and integration tests
     - name: Start services for testing
@@ -81,7 +84,7 @@ jobs:
         DATABASE_URL: postgres://postgres:password@localhost:5432/bookapp
 
     - name: Run unit tests
-      run: cargo test --lib --workspace --verbose
+      run: cargo test --lib --bins --workspace --exclude integration-tests --verbose
       env:
         DATABASE_URL: postgres://postgres:password@localhost:5432/bookapp
         KAFKA_BOOTSTRAP_SERVERS: localhost:9092
@@ -116,7 +119,7 @@ jobs:
     - name: Run integration tests
       run: |
         echo "Running end-to-end integration tests..."
-        docker compose run --rm integration-tester cargo test --test telemetry_test -- --nocapture
+        docker compose run --rm integration-tester cargo test -p integration-tests --tests -- --nocapture
       timeout-minutes: 15
 
     - name: Show logs on failure

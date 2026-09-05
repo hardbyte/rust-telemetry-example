@@ -1,12 +1,11 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#     "locust",
-#     "opentelemetry-sdk >1.24",
-#     "opentelemetry-exporter-otlp-proto-grpc >=1.24.0",
-#    opentelemetry-instrumentation-requests==0.46b0
-#    opentelemetry-instrumentation-system-metrics==0.46b0
-#    "opentelemetry-instrumentation-urllib3==0.46b0",
+#     "locust==2.46.4",
+#     "opentelemetry-sdk==1.44.0",
+#     "opentelemetry-exporter-otlp-proto-grpc==1.44.0",
+#     "opentelemetry-instrumentation-requests==0.65b0",
+#     "opentelemetry-instrumentation-urllib3==0.65b0",
 # ]
 # ///
 from locust import HttpUser, TaskSet, task, between

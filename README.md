@@ -128,8 +128,12 @@ Visualized natively in Grafana:
 
 ### Metrics
 
-In application metrics are implemented via opentelemetry meter including for http requests
-via a fork of `axum-otel-metrics`. The otel collector also collects metrics from postgresql and
+For data that is already aggregated, see [Preaggregated OTLP histograms](preaggregated-metrics/README.md).
+This standalone Rust example sends supplied bucket populations directly using OpenTelemetry's
+generated OTLP client, with a provisioned Grafana dashboard and no scrape endpoint.
+
+In application metrics are implemented via the OpenTelemetry meter, including HTTP request
+duration recorded by an Axum middleware. The otel collector also collects metrics from postgresql and
 kafka exporting them all to Prometheus.
 
 ![img.png](.github/metrics.png)
@@ -275,11 +279,11 @@ The provided Locust script is also instrumented with OpenTelemetry.
 
 ```shell
 uvx \
-  --with 'opentelemetry-sdk' \
-  --with "opentelemetry-exporter-otlp-proto-grpc >=1.24.0" \
-  --with "opentelemetry-instrumentation-requests==0.46b0" \
-  --with "opentelemetry-instrumentation-urllib3==0.46b0" \
-  locust -f requests/locustfile.py
+  --with 'opentelemetry-sdk==1.44.0' \
+  --with "opentelemetry-exporter-otlp-proto-grpc==1.44.0" \
+  --with "opentelemetry-instrumentation-requests==0.65b0" \
+  --with "opentelemetry-instrumentation-urllib3==0.65b0" \
+  --from locust==2.46.4 locust -f requests/locustfile.py
 ```
 
 
@@ -385,4 +389,3 @@ Integration tests verify:
 - Error injection and telemetry generation
 - Cross-service trace correlation
 - Repository pattern functionality and database operations
-

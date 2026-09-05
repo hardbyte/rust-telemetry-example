@@ -12,16 +12,20 @@ name = "telemetry_test"
 path = "src/telemetry_test.rs"
 harness = true
 
+[[test]]
+name = "histogram_dashboard"
+path = "src/histogram_dashboard.rs"
+
 [dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["json", "query"] }
 opentelemetry = { workspace = true }
-opentelemetry_sdk = { version = "0.31.0", features = ["trace", "rt-tokio"] }
-opentelemetry-otlp = { version = "0.31.0", features = ["reqwest-client", "grpc-tonic"] }
+opentelemetry_sdk = { version = "0.32.1", features = ["trace", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.32.0", features = ["reqwest-client", "grpc-tonic"] }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 urlencoding = "2.1"
-rand = "0.9.1"
+rand = "0.10.2"
